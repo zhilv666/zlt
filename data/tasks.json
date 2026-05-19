@@ -1,0 +1,28 @@
+[
+  {
+    "id": "openlist",
+    "name": "OpenList",
+    "program": "openlist.exe",
+    "args": [
+      "server"
+    ],
+    "workdir": "D:\\SoftWare\\OpenList\\",
+    "env": [],
+    "autostart": false,
+    "restart_on_crash": false,
+    "stop_timeout_sec": 8
+  },
+  {
+    "id": "gitea",
+    "name": "Gitea",
+    "program": "gitea-1.24.4-windows-4.0-amd64.exe",
+    "args": [
+      "web"
+    ],
+    "workdir": "D:\\SoftWare\\Gitea",
+    "env": [],
+    "autostart": false,
+    "restart_on_crash": false,
+    "stop_timeout_sec": 8
+  }
+]

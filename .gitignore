@@ -1,0 +1,7 @@
+.gocache/
+.gomodcache/
+data/logs/
+tray.exe
+*.db
+*.sqlite
+*.sqlite3
