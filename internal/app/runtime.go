@@ -23,7 +23,13 @@ type Runtime struct {
 }
 
 func NewRuntime() (*Runtime, error) {
-	taskStore := store.NewTaskStore(filepath.Join("data", "tasks.json"))
+	taskStore, err := store.NewTaskStore(
+		filepath.Join("data", "tasks.db"),
+		filepath.Join("data", "tasks.json"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	tasks, err := taskStore.Load()
 	if err != nil {
 		return nil, err
@@ -49,6 +55,9 @@ func (r *Runtime) StartHTTP() error {
 }
 
 func (r *Runtime) Shutdown(ctx context.Context) error {
+	if r.TaskStore != nil {
+		_ = r.TaskStore.Close()
+	}
 	return r.HTTP.Shutdown(ctx)
 }
 

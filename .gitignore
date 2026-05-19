@@ -5,3 +5,4 @@ tray.exe
 *.db
 *.sqlite
 *.sqlite3
+data/tasks.db
