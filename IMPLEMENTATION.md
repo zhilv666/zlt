@@ -29,3 +29,14 @@ Target capabilities:
 - View status from browser
 - View logs from browser
 - Persist task config locally
+
+## Next Round
+
+- [x] Support task auto-start on app launch
+- [x] Support restart-on-crash behavior
+- [x] Improve restart flow in web UI
+- [x] Add task import/export in the browser
+- [x] Add release packaging output
+- [x] Add build metadata to release artifacts
+- [x] Add cross-platform build tasks
+- [x] Verify build and runtime behavior

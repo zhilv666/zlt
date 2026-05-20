@@ -26,7 +26,7 @@ func Run() error {
 }
 
 func newHTTPServer(runtime *Runtime) *http.Server {
-	apiServer := api.NewServer(runtime, runtime.Manager)
+	apiServer := api.NewServer(runtime, runtime)
 	return &http.Server{
 		Addr:    "127.0.0.1:3719",
 		Handler: apiServer.Handler(),

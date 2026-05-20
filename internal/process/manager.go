@@ -335,10 +335,9 @@ func (m *Manager) wait(taskID string, cmd *exec.Cmd, stdoutFile, stderrFile *os.
 	_ = stderrFile.Close()
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	proc, ok := m.procs[taskID]
 	if !ok || proc.cmd != cmd {
+		m.mu.Unlock()
 		return
 	}
 
@@ -360,14 +359,26 @@ func (m *Manager) wait(taskID string, cmd *exec.Cmd, stdoutFile, stderrFile *os.
 		if proc.state.Status == StatusStopping {
 			proc.state.Status = StatusStopped
 			proc.state.LastError = ""
+			m.mu.Unlock()
 			return
 		}
 		proc.state.Status = StatusExited
 		proc.state.LastError = err.Error()
-	} else {
-		proc.state.Status = StatusStopped
-		proc.state.LastError = ""
+		shouldRestart := proc.task.RestartOnCrash
+		restartTaskID := proc.state.TaskID
+		m.mu.Unlock()
+		if shouldRestart {
+			go func() {
+				time.Sleep(2 * time.Second)
+				_ = m.Start(restartTaskID)
+			}()
+		}
+		return
 	}
+
+	proc.state.Status = StatusStopped
+	proc.state.LastError = ""
+	m.mu.Unlock()
 }
 
 func resolveProgramPath(program string, workdir string) string {

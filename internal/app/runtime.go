@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"tray/internal/process"
 	"tray/internal/store"
@@ -40,11 +41,17 @@ func NewRuntime() (*Runtime, error) {
 
 	manager := process.NewManager(tasks)
 
-	return &Runtime{
+	runtime := &Runtime{
 		TaskStore: taskStore,
 		Tasks:     tasks,
 		Manager:   manager,
-	}, nil
+	}
+
+	if err := runtime.applyAutoStart(); err != nil {
+		return nil, err
+	}
+
+	return runtime, nil
 }
 
 func (r *Runtime) StartHTTP() error {
@@ -63,6 +70,26 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 
 func (r *Runtime) Address() string {
 	return fmt.Sprintf("http://%s", r.HTTP.Addr)
+}
+
+func (r *Runtime) States() []process.RuntimeState {
+	return r.Manager.States()
+}
+
+func (r *Runtime) State(taskID string) (process.RuntimeState, bool) {
+	return r.Manager.State(taskID)
+}
+
+func (r *Runtime) Start(taskID string) error {
+	return r.Manager.Start(taskID)
+}
+
+func (r *Runtime) Stop(taskID string) error {
+	return r.Manager.Stop(taskID)
+}
+
+func (r *Runtime) ClearLogs(taskID string) error {
+	return r.Manager.ClearLogs(taskID)
 }
 
 func (r *Runtime) ListTasks() []task.Config {
@@ -123,6 +150,45 @@ func (r *Runtime) DeleteTask(taskID string) error {
 	return r.TaskStore.Save(r.Tasks)
 }
 
+func (r *Runtime) ExportTasks() []task.Config {
+	return r.ListTasks()
+}
+
+func (r *Runtime) ReplaceTasks(tasks []task.Config) error {
+	normalized := make([]task.Config, 0, len(tasks))
+	seen := make(map[string]struct{}, len(tasks))
+	for _, cfg := range tasks {
+		cfg = normalizeTask(cfg)
+		if err := validateTask(cfg); err != nil {
+			return err
+		}
+		if _, exists := seen[cfg.ID]; exists {
+			return fmt.Errorf("duplicate task id %q", cfg.ID)
+		}
+		seen[cfg.ID] = struct{}{}
+		normalized = append(normalized, cfg)
+	}
+	if len(normalized) == 0 {
+		normalized = []task.Config{task.DefaultOpenListTask()}
+	}
+
+	for _, st := range r.Manager.States() {
+		if st.Status == process.StatusRunning || st.Status == process.StatusStarting || st.Status == process.StatusStopping {
+			return errors.New("stop all running tasks before import")
+		}
+	}
+
+	r.mu.Lock()
+	r.Tasks = normalized
+	r.Manager = process.NewManager(normalized)
+	if err := r.TaskStore.Save(r.Tasks); err != nil {
+		r.mu.Unlock()
+		return err
+	}
+	r.mu.Unlock()
+	return r.applyAutoStart()
+}
+
 func normalizeTask(cfg task.Config) task.Config {
 	cfg.ID = strings.TrimSpace(cfg.ID)
 	cfg.Name = strings.TrimSpace(cfg.Name)
@@ -154,4 +220,34 @@ func validateTask(cfg task.Config) error {
 		return errors.New("program is required")
 	}
 	return nil
+}
+
+func (r *Runtime) applyAutoStart() error {
+	for _, cfg := range r.ListTasks() {
+		if !cfg.AutoStart {
+			continue
+		}
+		if err := r.Manager.Start(cfg.ID); err != nil {
+			return fmt.Errorf("auto-start %s failed: %w", cfg.ID, err)
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) RestartTask(taskID string) error {
+	if state, ok := r.Manager.State(taskID); ok {
+		if state.Status == process.StatusRunning || state.Status == process.StatusStarting || state.Status == process.StatusStopping {
+			if err := r.Manager.Stop(taskID); err != nil {
+				return err
+			}
+			for i := 0; i < 50; i++ {
+				state, ok = r.Manager.State(taskID)
+				if !ok || (state.Status != process.StatusRunning && state.Status != process.StatusStarting && state.Status != process.StatusStopping) {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}
+	return r.Manager.Start(taskID)
 }

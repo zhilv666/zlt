@@ -1,6 +1,7 @@
 .gocache/
 .gomodcache/
 bin/
+dist/
 *.exe
 *.db
 *.sqlite

@@ -17,6 +17,9 @@ type Runtime interface {
 	ListTasks() []task.Config
 	UpsertTask(task.Config) error
 	DeleteTask(string) error
+	RestartTask(string) error
+	ExportTasks() []task.Config
+	ReplaceTasks([]task.Config) error
 }
 
 type ProcessManager interface {
@@ -51,6 +54,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/build-info", s.handleBuildInfo)
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/tasks/", s.handleTaskAction)
+	mux.HandleFunc("/api/tasks-export", s.handleTasksExport)
+	mux.HandleFunc("/api/tasks-import", s.handleTasksImport)
 	return mux
 }
 
@@ -117,6 +122,37 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleTasksExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="tasks-export.json"`)
+	_ = json.NewEncoder(w).Encode(s.runtime.ExportTasks())
+}
+
+func (s *Server) handleTasksImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+		return
+	}
+
+	var payload []task.Config
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: "invalid json"})
+		return
+	}
+
+	if err := s.runtime.ReplaceTasks(payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, response{Code: 0, Msg: "imported"})
+}
+
 func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
 	parts := strings.Split(path, "/")
@@ -179,15 +215,7 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
 			return
 		}
-		if state, ok := s.manager.State(taskID); ok {
-			if state.Status == process.StatusRunning || state.Status == process.StatusStarting || state.Status == process.StatusStopping {
-				if err := s.manager.Stop(taskID); err != nil {
-					writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
-					return
-				}
-			}
-		}
-		if err := s.manager.Start(taskID); err != nil {
+		if err := s.runtime.RestartTask(taskID); err != nil {
 			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
 			return
 		}
@@ -223,6 +251,24 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, response{Code: 0, Msg: "ok", Data: map[string]string{"content": data}})
+	case "download-logs":
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+			return
+		}
+		logType := r.URL.Query().Get("type")
+		if logType == "" {
+			logType = "stdout"
+		}
+		logPath := filepath.Join("data", "logs", taskID, logType+".log")
+		data, err := os.ReadFile(logPath)
+		if err != nil && !os.IsNotExist(err) {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+taskID+"-"+logType+`.log"`)
+		_, _ = w.Write(data)
 	case "clear-logs":
 		if r.Method != http.MethodPost {
 			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
@@ -828,6 +874,13 @@ const indexHTML = `
             所有任务
           </div>
           <div style="display: flex; gap: 0.75rem;">
+            <button class="btn btn-sm" onclick="exportTasks()">
+              导出任务
+            </button>
+            <label class="btn btn-sm" for="task-import-file" style="margin:0;">
+              导入任务
+            </label>
+            <input id="task-import-file" type="file" accept="application/json" style="display:none;">
             <button class="btn btn-sm btn-primary" onclick="openNewTaskModal()">
               <svg style="width:14px;height:14px;margin-right:4px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               添加任务
@@ -872,6 +925,7 @@ const indexHTML = `
             </div>
             <div style="flex-grow: 1;"></div>
             <button class="btn btn-sm" onclick="loadLogs()">读取</button>
+            <button class="btn btn-sm" onclick="downloadLogs()">下载</button>
             <button class="btn btn-sm btn-danger" onclick="clearLogs()">清空</button>
           </div>
           <pre id="logs" class="log-viewer"></pre>
@@ -944,6 +998,7 @@ const indexHTML = `
   <script>
     let currentTasks = [];
     let editingTaskId = '';
+    let actionInFlight = new Set();
 
     document.getElementById('current-year').textContent = new Date().getFullYear();
 
@@ -1061,6 +1116,7 @@ const indexHTML = `
         const status = item.status.status || 'stopped';
         const isRunning = isRunningStatus(status);
         const toggleAction = isRunning ? 'stop' : 'start';
+        const busy = actionInFlight.has(item.task.id);
         
         let toggleIcon = isRunning 
           ? '<svg style="width:14px;height:14px;margin-right:4px;" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>'
@@ -1069,7 +1125,7 @@ const indexHTML = `
         const toggleClass = isRunning ? 'btn-danger' : 'btn-primary';
         
         const lastError = item.status.last_error ? '<span class="error-text" title="' + escapeHTML(item.status.last_error) + '">' + escapeHTML(item.status.last_error) + '</span>' : '';
-        const disabledActions = isRunning;
+        const disabledActions = isRunning || busy;
 
         const option = document.createElement('option');
         option.value = item.task.id;
@@ -1100,8 +1156,8 @@ const indexHTML = `
             '<div class="task-meta" style="margin-top:4px;">异常重启: <strong>' + (item.task.restart_on_crash ? '是' : '否') + '</strong></div>' +
           '</div>' +
           '<div class="actions-group">' +
-            '<button class="btn btn-sm ' + toggleClass + '" data-id="' + item.task.id + '" data-action="' + toggleAction + '">' + toggleIcon + toggleLabel + '</button>' +
-            '<button class="btn btn-sm" data-id="' + item.task.id + '" data-action="restart">重启</button>' +
+            '<button class="btn btn-sm ' + toggleClass + '" data-id="' + item.task.id + '" data-action="' + toggleAction + '"' + (busy ? ' disabled' : '') + '>' + (busy ? '处理中...' : toggleIcon + toggleLabel) + '</button>' +
+            '<button class="btn btn-sm" data-id="' + item.task.id + '" data-action="restart"' + (busy ? ' disabled' : '') + '>重启</button>' +
             '<button class="btn btn-sm" data-id="' + item.task.id + '" data-action="edit"' + (disabledActions ? ' disabled title="运行中不可编辑"' : '') + '>编辑</button>' +
             '<button class="btn btn-sm btn-danger" data-id="' + item.task.id + '" data-action="delete"' + (disabledActions ? ' disabled title="运行中不可删除"' : '') + '>删除</button>' +
             '<button class="btn btn-sm" data-id="' + item.task.id + '" data-action="logs">看日志</button>' +
@@ -1150,16 +1206,18 @@ const indexHTML = `
           }
 
           // start or stop
-          const originalText = btn.innerHTML;
-          btn.innerHTML = '处理中...';
-          btn.disabled = true;
-          
-          const result = await api('/api/tasks/' + id + '/' + action, { method: 'POST' });
-          if (result.code !== 0) {
-            alert(result.msg || '操作失败');
-          }
+          actionInFlight.add(id);
           await loadTasks();
-          await loadLogs();
+          try {
+            const result = await api('/api/tasks/' + id + '/' + action, { method: 'POST' });
+            if (result.code !== 0) {
+              alert(result.msg || '操作失败');
+            }
+          } finally {
+            actionInFlight.delete(id);
+            await loadTasks();
+            await loadLogs();
+          }
         });
       });
     }
@@ -1265,6 +1323,52 @@ const indexHTML = `
       await loadLogs();
     }
 
+    function exportTasks() {
+      window.location.href = '/api/tasks-export';
+    }
+
+    async function importTasks(file) {
+      const text = await file.text();
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch (err) {
+        alert('导入文件不是合法 JSON');
+        return;
+      }
+
+      if (!Array.isArray(payload)) {
+        alert('导入文件必须是任务数组');
+        return;
+      }
+
+      if (!confirm('导入会覆盖当前任务列表，且要求先停止所有任务。是否继续？')) {
+        return;
+      }
+
+      const result = await api('/api/tasks-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (result.code !== 0) {
+        alert(result.msg || '导入失败');
+        return;
+      }
+      await loadTasks();
+      await loadLogs();
+    }
+
+    function downloadLogs() {
+      const taskId = document.getElementById('log-task').value;
+      const type = document.getElementById('log-type').value;
+      if (!taskId) {
+        alert('请选择一个任务');
+        return;
+      }
+      window.location.href = '/api/tasks/' + taskId + '/download-logs?type=' + encodeURIComponent(type);
+    }
+
     // Init
     loadTasks();
     
@@ -1279,6 +1383,15 @@ const indexHTML = `
     // Trigger task selection change
     document.getElementById('log-task').addEventListener('change', loadLogs);
     document.getElementById('log-type').addEventListener('change', loadLogs);
+    document.getElementById('task-import-file').addEventListener('change', async (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      try {
+        await importTasks(file);
+      } finally {
+        event.target.value = '';
+      }
+    });
   </script>
 </body>
 </html>`

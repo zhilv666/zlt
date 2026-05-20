@@ -20,3 +20,33 @@ tasks:
     desc: Build Windows GUI binary to bin/
     cmds:
       - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/tray-windows-amd64 windows amd64"
+
+  build:linux:
+    desc: Build Linux binary to bin/
+    cmds:
+      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/tray-linux-amd64 linux amd64"
+
+  build:darwin:
+    desc: Build macOS binary to bin/
+    cmds:
+      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/tray-darwin-amd64 darwin amd64"
+
+  release:
+    desc: Create current host release directory in dist/
+    cmds:
+      - sh ./scripts/release.sh
+
+  release:windows:
+    desc: Create Windows release directory in dist/
+    cmds:
+      - sh ./scripts/release.sh windows amd64
+
+  release:linux:
+    desc: Create Linux release directory in dist/
+    cmds:
+      - sh ./scripts/release.sh linux amd64
+
+  release:darwin:
+    desc: Create macOS release directory in dist/
+    cmds:
+      - sh ./scripts/release.sh darwin amd64
