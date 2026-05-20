@@ -1,9 +1,11 @@
 package app
 
 import (
+	"log"
 	"net/http"
 
 	"tray/internal/api"
+	"tray/internal/buildinfo"
 )
 
 func Run() error {
@@ -17,6 +19,8 @@ func Run() error {
 	if err := runtime.StartHTTP(); err != nil {
 		return err
 	}
+
+	log.Printf("tray starting: %s", buildinfo.Summary())
 
 	return runTray(runtime)
 }
