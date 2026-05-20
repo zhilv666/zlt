@@ -6,11 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"tray/internal/task"
@@ -244,9 +241,7 @@ func (m *Manager) Start(taskID string) error {
 	cmd.Env = append(os.Environ(), proc.task.Env...)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
-	}
+	prepareCommand(cmd)
 
 	if err := cmd.Start(); err != nil {
 		_ = stdoutFile.Close()
@@ -395,70 +390,4 @@ func resolveProgramPath(program string, workdir string) string {
 
 func isRunningStatus(status string) bool {
 	return status == StatusRunning || status == StatusStarting || status == StatusStopping
-}
-
-func killProcessTree(pid int) error {
-	if pid <= 0 {
-		return errors.New("invalid pid")
-	}
-
-	if runtime.GOOS == "windows" {
-		killCmd := exec.Command("taskkill", "/PID", fmt.Sprintf("%d", pid), "/T", "/F")
-		output, err := killCmd.CombinedOutput()
-		if err != nil {
-			msg := strings.TrimSpace(string(output))
-			if msg != "" {
-				return fmt.Errorf("taskkill failed: %s", msg)
-			}
-			return err
-		}
-		return nil
-	}
-
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	return proc.Kill()
-}
-
-func findExistingProcess(cfg task.Config) (int, bool) {
-	if runtime.GOOS != "windows" {
-		return 0, false
-	}
-
-	workdir := cfg.WorkDir
-	if workdir == "" {
-		workdir = "."
-	}
-	resolvedProgram := resolveProgramPath(cfg.Program, workdir)
-	if !filepath.IsAbs(resolvedProgram) {
-		if abs, err := filepath.Abs(resolvedProgram); err == nil {
-			resolvedProgram = abs
-		}
-	}
-
-	script := "$exe = [System.IO.Path]::GetFullPath('" + escapePowerShellSingleQuoted(resolvedProgram) + "'); " +
-		"$proc = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ([System.StringComparer]::OrdinalIgnoreCase.Equals($_.ExecutablePath, $exe)) } | Select-Object -First 1 -ExpandProperty ProcessId; " +
-		"if ($proc) { Write-Output $proc }"
-
-	out, err := exec.Command("powershell.exe", "-NoProfile", "-Command", script).CombinedOutput()
-	if err != nil {
-		return 0, false
-	}
-
-	text := strings.TrimSpace(string(out))
-	if text == "" {
-		return 0, false
-	}
-
-	pid, err := strconv.Atoi(text)
-	if err != nil || pid <= 0 {
-		return 0, false
-	}
-	return pid, true
-}
-
-func escapePowerShellSingleQuoted(value string) string {
-	return strings.ReplaceAll(value, "'", "''")
 }

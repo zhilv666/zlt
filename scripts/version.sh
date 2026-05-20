@@ -1,8 +1,10 @@
 #!/usr/bin/env sh
 set -eu
 
-VERSION=$(git -c safe.directory=C:/Users/zhanghoulin/Desktop/tray describe --tags --always | tr -d '\r')
-COMMIT=$(git -c safe.directory=C:/Users/zhanghoulin/Desktop/tray rev-parse --short HEAD | tr -d '\r')
+REPO_DIR=$(pwd -W 2>/dev/null || pwd)
+
+VERSION=$(git -c safe.directory="$REPO_DIR" describe --tags --always | tr -d '\r')
+COMMIT=$(git -c safe.directory="$REPO_DIR" rev-parse --short HEAD | tr -d '\r')
 BUILD_TIME=$(date +"%Y-%m-%dT%H:%M:%S%z")
 PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')/$(uname -m)"
 
