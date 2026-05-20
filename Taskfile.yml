@@ -7,11 +7,11 @@ tasks:
       - sh ./scripts/version.sh
 
   build:
-    desc: Build release artifact to dist/
+    desc: Build release artifact to bin/
     cmds:
-      - sh -c "mkdir -p ./dist && ./scripts/build.sh ./dist/tray-windows-amd64.exe windows amd64"
+      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/tray-windows-amd64.exe windows amd64"
 
   build:current:
-    desc: Build tray.exe for current host
+    desc: Build current host binary to bin/
     cmds:
-      - sh ./scripts/build.sh ./tray.exe
+      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/tray.exe"

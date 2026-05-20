@@ -174,6 +174,24 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, response{Code: 0, Msg: "stopped"})
+	case "restart":
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+			return
+		}
+		if state, ok := s.manager.State(taskID); ok {
+			if state.Status == process.StatusRunning || state.Status == process.StatusStarting || state.Status == process.StatusStopping {
+				if err := s.manager.Stop(taskID); err != nil {
+					writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+					return
+				}
+			}
+		}
+		if err := s.manager.Start(taskID); err != nil {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, response{Code: 0, Msg: "restarted"})
 	case "status":
 		if r.Method != http.MethodGet {
 			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
@@ -1083,6 +1101,7 @@ const indexHTML = `
           '</div>' +
           '<div class="actions-group">' +
             '<button class="btn btn-sm ' + toggleClass + '" data-id="' + item.task.id + '" data-action="' + toggleAction + '">' + toggleIcon + toggleLabel + '</button>' +
+            '<button class="btn btn-sm" data-id="' + item.task.id + '" data-action="restart">重启</button>' +
             '<button class="btn btn-sm" data-id="' + item.task.id + '" data-action="edit"' + (disabledActions ? ' disabled title="运行中不可编辑"' : '') + '>编辑</button>' +
             '<button class="btn btn-sm btn-danger" data-id="' + item.task.id + '" data-action="delete"' + (disabledActions ? ' disabled title="运行中不可删除"' : '') + '>删除</button>' +
             '<button class="btn btn-sm" data-id="' + item.task.id + '" data-action="logs">看日志</button>' +

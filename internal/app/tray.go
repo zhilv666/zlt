@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"tray/internal/buildinfo"
 	"tray/internal/process"
 	"github.com/getlantern/systray"
 )
@@ -19,7 +20,6 @@ type trayTaskItem struct {
 type trayController struct {
 	rt        *Runtime
 	mu        sync.Mutex
-	root      *systray.MenuItem
 	taskItems map[string]*trayTaskItem
 }
 
@@ -43,11 +43,12 @@ func (c *trayController) onReady() {
 
 	openItem := systray.AddMenuItem("打开控制面板", "Open Dashboard")
 	systray.AddSeparator()
-	c.root = systray.AddMenuItem("任务控制", "Tasks")
+	c.syncTaskMenus()
+	systray.AddSeparator()
+	aboutRoot := systray.AddMenuItem("About / Version", "Build information")
+	c.initAboutMenu(aboutRoot)
 	systray.AddSeparator()
 	quitItem := systray.AddMenuItem("退出", "Quit the tray app")
-
-	c.syncTaskMenus()
 
 	go func() {
 		ticker := time.NewTicker(1500 * time.Millisecond)
@@ -78,16 +79,16 @@ func (c *trayController) syncTaskMenus() {
 		seen[cfg.ID] = struct{}{}
 		entry, ok := c.taskItems[cfg.ID]
 		if !ok {
-			menu := c.root.AddSubMenuItem("", "")
+			item := systray.AddMenuItem("", "")
 			entry = &trayTaskItem{
 				taskID: cfg.ID,
-				item:   menu,
+				item:   item,
 			}
 			c.taskItems[cfg.ID] = entry
 
 			go c.listenTaskItem(entry)
 		}
-		c.refreshTaskItem(cfg.ID, cfg.Name, entry.item)
+		c.refreshTaskItem(cfg.ID, cfg.Name, entry)
 		entry.item.Show()
 	}
 
@@ -99,39 +100,41 @@ func (c *trayController) syncTaskMenus() {
 }
 
 func (c *trayController) listenTaskItem(entry *trayTaskItem) {
-	for range entry.item.ClickedCh {
-		state, ok := c.rt.Manager.State(entry.taskID)
-		if ok && isTaskRunning(state.Status) {
-			_ = c.rt.Manager.Stop(entry.taskID)
-		} else {
-			_ = c.rt.Manager.Start(entry.taskID)
+	go func() {
+		for range entry.item.ClickedCh {
+			state, ok := c.rt.Manager.State(entry.taskID)
+			if ok && isTaskRunning(state.Status) {
+				_ = c.rt.Manager.Stop(entry.taskID)
+			} else {
+				_ = c.rt.Manager.Start(entry.taskID)
+			}
+			c.mu.Lock()
+			name := c.lookupTaskName(entry.taskID)
+			c.refreshTaskItem(entry.taskID, name, entry)
+			c.mu.Unlock()
 		}
-		c.mu.Lock()
-		name := c.lookupTaskName(entry.taskID)
-		c.refreshTaskItem(entry.taskID, name, entry.item)
-		c.mu.Unlock()
-	}
+	}()
 }
 
-func (c *trayController) refreshTaskItem(taskID string, taskName string, item *systray.MenuItem) {
+func (c *trayController) refreshTaskItem(taskID string, taskName string, entry *trayTaskItem) {
 	state, ok := c.rt.Manager.State(taskID)
 	if !ok || !isTaskRunning(state.Status) {
-		item.SetTitle("▶ 启动 " + taskName)
-		item.SetTooltip("Start " + taskName)
-		item.Enable()
+		entry.item.SetTitle("▶ 启动 " + taskName)
+		entry.item.SetTooltip("Start " + taskName)
+		entry.item.Enable()
 		return
 	}
 
 	if state.Status == process.StatusStarting || state.Status == process.StatusStopping {
-		item.SetTitle("⏳ 处理中 " + taskName)
-		item.SetTooltip("Busy " + taskName)
-		item.Disable()
+		entry.item.SetTitle("⏳ 处理中 " + taskName)
+		entry.item.SetTooltip("Busy " + taskName)
+		entry.item.Disable()
 		return
 	}
 
-	item.SetTitle("■ 停止 " + taskName)
-	item.SetTooltip("Stop " + taskName)
-	item.Enable()
+	entry.item.SetTitle("■ 停止 " + taskName)
+	entry.item.SetTooltip("Stop " + taskName)
+	entry.item.Enable()
 }
 
 func (c *trayController) lookupTaskName(taskID string) string {
@@ -146,6 +149,25 @@ func (c *trayController) lookupTaskName(taskID string) string {
 
 func isTaskRunning(status string) bool {
 	return status == process.StatusRunning || status == process.StatusStarting || status == process.StatusStopping
+}
+
+func (c *trayController) initAboutMenu(root *systray.MenuItem) {
+	info := buildinfo.Current()
+
+	titleItem := root.AddSubMenuItem("Tray Command Manager", "Application")
+	titleItem.Disable()
+
+	versionItem := root.AddSubMenuItem("Version: "+info.Version, "Version")
+	versionItem.Disable()
+
+	commitItem := root.AddSubMenuItem("Commit: "+info.Commit, "Commit")
+	commitItem.Disable()
+
+	platformItem := root.AddSubMenuItem("Platform: "+info.Platform, "Platform")
+	platformItem.Disable()
+
+	buildTimeItem := root.AddSubMenuItem("Build: "+info.BuildTime, "Build time")
+	buildTimeItem.Disable()
 }
 
 func openBrowser(url string) {

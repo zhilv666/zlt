@@ -13,7 +13,6 @@ export GOSUMDB="off"
 VERSION=$(git -c safe.directory=C:/Users/zhanghoulin/Desktop/tray describe --tags --always | tr -d '\r')
 COMMIT=$(git -c safe.directory=C:/Users/zhanghoulin/Desktop/tray rev-parse --short HEAD | tr -d '\r')
 BUILD_TIME=$(date +"%Y-%m-%dT%H:%M:%S%z")
-BUILT_BY=${USERNAME:-${USER:-unknown}}
 
 export GOOS="$TARGET_OS"
 export GOARCH="$TARGET_ARCH"
@@ -21,14 +20,12 @@ export GOARCH="$TARGET_ARCH"
 LDFLAGS="-X tray/internal/buildinfo.Version=$VERSION \
 -X tray/internal/buildinfo.Commit=$COMMIT \
 -X tray/internal/buildinfo.BuildTime=$BUILD_TIME \
--X tray/internal/buildinfo.BuiltBy=$BUILT_BY \
 -X tray/internal/buildinfo.TargetOS=$TARGET_OS \
 -X tray/internal/buildinfo.TargetArch=$TARGET_ARCH"
 
 printf 'version=%s\n' "$VERSION"
 printf 'commit=%s\n' "$COMMIT"
 printf 'build_time=%s\n' "$BUILD_TIME"
-printf 'built_by=%s\n' "$BUILT_BY"
 printf 'platform=%s/%s\n' "$TARGET_OS" "$TARGET_ARCH"
 
 go build -ldflags "$LDFLAGS" -o "$OUTPUT" ./cmd/tray
