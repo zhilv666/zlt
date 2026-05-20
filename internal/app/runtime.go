@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -194,11 +195,26 @@ func normalizeTask(cfg task.Config) task.Config {
 	cfg.Name = strings.TrimSpace(cfg.Name)
 	cfg.Program = strings.TrimSpace(cfg.Program)
 	cfg.WorkDir = strings.TrimSpace(cfg.WorkDir)
+	cfg.HealthCheckURL = strings.TrimSpace(cfg.HealthCheckURL)
 	if cfg.WorkDir == "" {
 		cfg.WorkDir = "."
 	}
 	if cfg.StopTimeoutSec <= 0 {
 		cfg.StopTimeoutSec = 8
+	}
+	if cfg.RestartDelaySec <= 0 {
+		cfg.RestartDelaySec = 2
+	}
+	if cfg.MaxRestartCount < 0 {
+		cfg.MaxRestartCount = 0
+	}
+	if cfg.HealthCheckURL != "" {
+		if cfg.HealthCheckIntervalSec <= 0 {
+			cfg.HealthCheckIntervalSec = 10
+		}
+		if cfg.HealthCheckFailureThreshold <= 0 {
+			cfg.HealthCheckFailureThreshold = 3
+		}
 	}
 	if cfg.Args == nil {
 		cfg.Args = []string{}
@@ -219,6 +235,30 @@ func validateTask(cfg task.Config) error {
 	if cfg.Program == "" {
 		return errors.New("program is required")
 	}
+	if cfg.RestartDelaySec < 0 {
+		return errors.New("restart delay must be >= 0")
+	}
+	if cfg.MaxRestartCount < 0 {
+		return errors.New("max restart count must be >= 0")
+	}
+	if cfg.HealthCheckIntervalSec < 0 {
+		return errors.New("health check interval must be >= 0")
+	}
+	if cfg.HealthCheckFailureThreshold < 0 {
+		return errors.New("health check failure threshold must be >= 0")
+	}
+	if cfg.HealthCheckURL != "" {
+		parsed, err := url.ParseRequestURI(cfg.HealthCheckURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return errors.New("health check URL must be a valid http/https URL")
+		}
+		if cfg.HealthCheckIntervalSec <= 0 {
+			return errors.New("health check interval must be > 0 when health check is enabled")
+		}
+		if cfg.HealthCheckFailureThreshold <= 0 {
+			return errors.New("health check failure threshold must be > 0 when health check is enabled")
+		}
+	}
 	return nil
 }
 
@@ -235,19 +275,25 @@ func (r *Runtime) applyAutoStart() error {
 }
 
 func (r *Runtime) RestartTask(taskID string) error {
-	if state, ok := r.Manager.State(taskID); ok {
-		if state.Status == process.StatusRunning || state.Status == process.StatusStarting || state.Status == process.StatusStopping {
-			if err := r.Manager.Stop(taskID); err != nil {
-				return err
-			}
-			for i := 0; i < 50; i++ {
-				state, ok = r.Manager.State(taskID)
-				if !ok || (state.Status != process.StatusRunning && state.Status != process.StatusStarting && state.Status != process.StatusStopping) {
-					break
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
+	state, ok := r.Manager.State(taskID)
+	if !ok {
+		return fmt.Errorf("%w: %s", process.ErrTaskNotFound, taskID)
+	}
+	if state.Status == process.StatusRunning || state.Status == process.StatusStarting || state.Status == process.StatusStopping {
+		if err := r.Manager.Stop(taskID); err != nil {
+			return err
 		}
+		for i := 0; i < 50; i++ {
+			state, ok = r.Manager.State(taskID)
+			if !ok {
+				return fmt.Errorf("%w: %s", process.ErrTaskNotFound, taskID)
+			}
+			if state.Status != process.StatusRunning && state.Status != process.StatusStarting && state.Status != process.StatusStopping {
+				return r.Manager.Start(taskID)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		return errors.New("task did not stop in time before restart")
 	}
 	return r.Manager.Start(taskID)
 }

@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !unix
 
 package process
 
@@ -11,6 +11,13 @@ import (
 )
 
 func prepareCommand(cmd *exec.Cmd) {}
+
+func requestProcessStop(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	return cmd.Process.Signal(os.Interrupt)
+}
 
 func killProcessTree(pid int) error {
 	if pid <= 0 {

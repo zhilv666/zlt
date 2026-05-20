@@ -45,9 +45,9 @@ Target capabilities:
 
 - [x] Prepare v0.1.0 release surface
 - [x] Add automated tests for core modules
-- [ ] Harden runtime edge-case handling
-- [ ] Refine log rotation and retention
-- [ ] Split embedded web assets into standalone files
-- [ ] Expand task model with health checks and restart policies
-- [ ] Implement full cross-platform runtime behavior
-- [ ] Introduce realtime event streaming for status and logs
+- [x] Harden runtime edge-case handling
+- [x] Refine log rotation and retention
+- [x] Split embedded web assets into standalone files
+- [x] Expand task model with health checks and restart policies
+- [x] Implement full cross-platform runtime behavior
+- [x] Introduce realtime event streaming for status and logs

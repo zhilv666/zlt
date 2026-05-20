@@ -19,15 +19,20 @@ func TestTaskStoreSaveAndLoad(t *testing.T) {
 
 	input := []task.Config{
 		{
-			ID:             "openlist",
-			Name:           "OpenList",
-			Program:        "openlist.exe",
-			Args:           []string{"server"},
-			WorkDir:        "D:/SoftWare/OpenList",
-			Env:            []string{"A=1"},
-			AutoStart:      true,
-			RestartOnCrash: true,
-			StopTimeoutSec: 12,
+			ID:                          "openlist",
+			Name:                        "OpenList",
+			Program:                     "openlist.exe",
+			Args:                        []string{"server"},
+			WorkDir:                     "D:/SoftWare/OpenList",
+			Env:                         []string{"A=1"},
+			AutoStart:                   true,
+			RestartOnCrash:              true,
+			StopTimeoutSec:              12,
+			RestartDelaySec:             5,
+			MaxRestartCount:             9,
+			HealthCheckURL:              "http://127.0.0.1:5244/health",
+			HealthCheckIntervalSec:      11,
+			HealthCheckFailureThreshold: 4,
 		},
 	}
 
@@ -46,8 +51,11 @@ func TestTaskStoreSaveAndLoad(t *testing.T) {
 	if got.ID != input[0].ID || got.Program != input[0].Program || got.WorkDir != input[0].WorkDir {
 		t.Fatalf("unexpected loaded task: %+v", got)
 	}
-	if !got.AutoStart || !got.RestartOnCrash || got.StopTimeoutSec != 12 {
+	if !got.AutoStart || !got.RestartOnCrash || got.StopTimeoutSec != 12 || got.RestartDelaySec != 5 || got.MaxRestartCount != 9 {
 		t.Fatalf("unexpected loaded flags: %+v", got)
+	}
+	if got.HealthCheckURL != "http://127.0.0.1:5244/health" || got.HealthCheckIntervalSec != 11 || got.HealthCheckFailureThreshold != 4 {
+		t.Fatalf("unexpected health check config: %+v", got)
 	}
 	if len(got.Args) != 1 || got.Args[0] != "server" || len(got.Env) != 1 || got.Env[0] != "A=1" {
 		t.Fatalf("unexpected loaded arrays: %+v", got)

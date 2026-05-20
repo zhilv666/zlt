@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 
@@ -56,7 +57,7 @@ func (s *TaskStore) Close() error {
 
 func (s *TaskStore) Load() ([]task.Config, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, program, args_json, workdir, env_json, autostart, restart_on_crash, stop_timeout_sec
+		SELECT id, name, program, args_json, workdir, env_json, autostart, restart_on_crash, stop_timeout_sec, restart_delay_sec, max_restart_count, health_check_url, health_check_interval_sec, health_check_failure_threshold
 		FROM tasks
 		ORDER BY rowid ASC
 	`)
@@ -83,6 +84,11 @@ func (s *TaskStore) Load() ([]task.Config, error) {
 			&autostart,
 			&restartOnCrash,
 			&cfg.StopTimeoutSec,
+			&cfg.RestartDelaySec,
+			&cfg.MaxRestartCount,
+			&cfg.HealthCheckURL,
+			&cfg.HealthCheckIntervalSec,
+			&cfg.HealthCheckFailureThreshold,
 		); err != nil {
 			return nil, err
 		}
@@ -127,8 +133,8 @@ func (s *TaskStore) Save(tasks []task.Config) error {
 	}
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO tasks (id, name, program, args_json, workdir, env_json, autostart, restart_on_crash, stop_timeout_sec)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO tasks (id, name, program, args_json, workdir, env_json, autostart, restart_on_crash, stop_timeout_sec, restart_delay_sec, max_restart_count, health_check_url, health_check_interval_sec, health_check_failure_threshold)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -155,6 +161,11 @@ func (s *TaskStore) Save(tasks []task.Config) error {
 			boolToInt(cfg.AutoStart),
 			boolToInt(cfg.RestartOnCrash),
 			cfg.StopTimeoutSec,
+			cfg.RestartDelaySec,
+			cfg.MaxRestartCount,
+			cfg.HealthCheckURL,
+			cfg.HealthCheckIntervalSec,
+			cfg.HealthCheckFailureThreshold,
 		); err != nil {
 			return err
 		}
@@ -174,10 +185,39 @@ func (s *TaskStore) initSchema() error {
 			env_json TEXT NOT NULL,
 			autostart INTEGER NOT NULL DEFAULT 0,
 			restart_on_crash INTEGER NOT NULL DEFAULT 0,
-			stop_timeout_sec INTEGER NOT NULL DEFAULT 8
+			stop_timeout_sec INTEGER NOT NULL DEFAULT 8,
+			restart_delay_sec INTEGER NOT NULL DEFAULT 2,
+			max_restart_count INTEGER NOT NULL DEFAULT 0,
+			health_check_url TEXT NOT NULL DEFAULT '',
+			health_check_interval_sec INTEGER NOT NULL DEFAULT 0,
+			health_check_failure_threshold INTEGER NOT NULL DEFAULT 0
 		)
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`ALTER TABLE tasks ADD COLUMN restart_delay_sec INTEGER NOT NULL DEFAULT 2`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE tasks ADD COLUMN max_restart_count INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE tasks ADD COLUMN health_check_url TEXT NOT NULL DEFAULT ''`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE tasks ADD COLUMN health_check_interval_sec INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE tasks ADD COLUMN health_check_failure_threshold INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	return nil
 }
 
 func (s *TaskStore) bootstrapFromJSONIfNeeded() error {

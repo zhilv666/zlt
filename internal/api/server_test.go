@@ -1,10 +1,17 @@
 package api
 
 import (
+	"bufio"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"tray/internal/process"
+	"tray/internal/task"
 )
 
 func TestReadLogTailReturnsMissingAsEmpty(t *testing.T) {
@@ -31,5 +38,116 @@ func TestReadLogTailReturnsLastNLines(t *testing.T) {
 	trimmed := strings.TrimSpace(content)
 	if trimmed != "4" {
 		t.Fatalf("unexpected log tail %q", content)
+	}
+}
+
+type testRuntime struct {
+	tasks []task.Config
+}
+
+func (r testRuntime) ListTasks() []task.Config       { return r.tasks }
+func (testRuntime) UpsertTask(task.Config) error     { return nil }
+func (testRuntime) DeleteTask(string) error          { return nil }
+func (testRuntime) RestartTask(string) error         { return nil }
+func (r testRuntime) ExportTasks() []task.Config     { return r.tasks }
+func (testRuntime) ReplaceTasks([]task.Config) error { return nil }
+
+type testManager struct {
+	states []process.RuntimeState
+}
+
+func (m testManager) States() []process.RuntimeState          { return m.states }
+func (testManager) State(string) (process.RuntimeState, bool) { return process.RuntimeState{}, false }
+func (testManager) Start(string) error                        { return nil }
+func (testManager) Stop(string) error                         { return nil }
+func (testManager) ClearLogs(string) error                    { return nil }
+
+func TestHandleTaskActionRejectsInvalidLogType(t *testing.T) {
+	server := NewServer(testRuntime{}, testManager{})
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/demo/logs?type=bad", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleTaskAction(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	var resp response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Msg != "invalid log type" {
+		t.Fatalf("unexpected message %q", resp.Msg)
+	}
+}
+
+func TestWriteTaskActionErrorUsesNotFoundForMissingTask(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeTaskActionError(rec, process.ErrTaskNotFound)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestBuildTaskItemsMatchesStates(t *testing.T) {
+	server := NewServer(
+		testRuntime{
+			tasks: []task.Config{{ID: "openlist", Name: "OpenList", Program: "openlist.exe"}},
+		},
+		testManager{
+			states: []process.RuntimeState{{TaskID: "openlist", Status: process.StatusRunning, PID: 1234}},
+		},
+	)
+
+	items := server.buildTaskItems()
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Task.ID != "openlist" || items[0].Status.PID != 1234 || items[0].Status.Status != process.StatusRunning {
+		t.Fatalf("unexpected item: %+v", items[0])
+	}
+}
+
+func TestHandleTaskEventsStreamsInitialSnapshot(t *testing.T) {
+	server := httptest.NewServer(NewServer(
+		testRuntime{
+			tasks: []task.Config{{ID: "demo", Name: "Demo", Program: "demo.exe"}},
+		},
+		testManager{
+			states: []process.RuntimeState{{TaskID: "demo", Status: process.StatusStopped}},
+		},
+	).Handler())
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/events/tasks")
+	if err != nil {
+		t.Fatalf("open task stream: %v", err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	var eventLine string
+	var dataLine string
+	for i := 0; i < 6; i++ {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read stream line: %v", err)
+		}
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "event: ") {
+			eventLine = line
+		}
+		if strings.HasPrefix(line, "data: ") {
+			dataLine = line
+			break
+		}
+	}
+
+	if eventLine != "event: tasks" {
+		t.Fatalf("unexpected event line: %q", eventLine)
+	}
+	if !strings.Contains(dataLine, `"id":"demo"`) {
+		t.Fatalf("unexpected data line: %q", dataLine)
 	}
 }

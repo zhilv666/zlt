@@ -1,5 +1,6 @@
 .gocache/
 .gomodcache/
+.tools/
 bin/
 dist/
 *.exe
@@ -7,3 +8,4 @@ dist/
 *.sqlite
 *.sqlite3
 data/
+cmd/tray/rsrc_windows_*.syso

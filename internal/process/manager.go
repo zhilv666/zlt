@@ -3,6 +3,7 @@ package process
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,13 @@ const (
 	StatusFailed   = "failed"
 )
 
+const (
+	maxLogSizeBytes = 10 * 1024 * 1024
+	maxLogBackups   = 3
+)
+
+var ErrTaskNotFound = errors.New("task not found")
+
 type RuntimeState struct {
 	TaskID    string     `json:"task_id"`
 	Status    string     `json:"status"`
@@ -33,12 +41,17 @@ type RuntimeState struct {
 }
 
 type managedProcess struct {
-	task   task.Config
-	cmd    *exec.Cmd
-	stdout *os.File
-	stderr *os.File
-	done   chan struct{}
-	state  RuntimeState
+	task           task.Config
+	cmd            *exec.Cmd
+	stdout         *os.File
+	stderr         *os.File
+	done           chan struct{}
+	healthStop     chan struct{}
+	state          RuntimeState
+	restartCount   int
+	healthFailures int
+	stopReason     stopReason
+	stopMessage    string
 }
 
 type Manager struct {
@@ -46,8 +59,17 @@ type Manager struct {
 	procs map[string]*managedProcess
 }
 
+type stopReason string
+
+const (
+	stopReasonUser   stopReason = "user"
+	stopReasonHealth stopReason = "health"
+)
+
 func NewManager(tasks []task.Config) *Manager {
-	procs := make(map[string]*managedProcess, len(tasks))
+	manager := &Manager{
+		procs: make(map[string]*managedProcess, len(tasks)),
+	}
 	for _, cfg := range tasks {
 		state := RuntimeState{
 			TaskID: cfg.ID,
@@ -58,12 +80,17 @@ func NewManager(tasks []task.Config) *Manager {
 			state.PID = pid
 		}
 
-		procs[cfg.ID] = &managedProcess{
-			task: cfg,
+		manager.procs[cfg.ID] = &managedProcess{
+			task:  cfg,
 			state: state,
 		}
 	}
-	return &Manager{procs: procs}
+	for _, proc := range manager.procs {
+		if proc.state.Status == StatusRunning {
+			manager.startHealthMonitorLocked(proc)
+		}
+	}
+	return manager
 }
 
 func (m *Manager) Tasks() []task.Config {
@@ -105,7 +132,7 @@ func (m *Manager) ClearLogs(taskID string) error {
 
 	proc, ok := m.procs[taskID]
 	if !ok {
-		return fmt.Errorf("task %q not found", taskID)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
 	}
 
 	if err := os.MkdirAll(filepath.Join("data", "logs", taskID), 0o755); err != nil {
@@ -169,7 +196,7 @@ func (m *Manager) RemoveTask(taskID string) error {
 
 	proc, ok := m.procs[taskID]
 	if !ok {
-		return fmt.Errorf("task %q not found", taskID)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
 	}
 	if proc.cmd != nil || isRunningStatus(proc.state.Status) {
 		return errors.New("task is running, stop it before deleting")
@@ -184,7 +211,7 @@ func (m *Manager) Start(taskID string) error {
 	proc, ok := m.procs[taskID]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("task %q not found", taskID)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
 	}
 	if proc.state.Status == StatusRunning || proc.state.Status == StatusStarting {
 		m.mu.Unlock()
@@ -195,6 +222,11 @@ func (m *Manager) Start(taskID string) error {
 		proc.state.Status = StatusRunning
 		proc.state.PID = pid
 		proc.state.LastError = ""
+		proc.state.ExitCode = nil
+		proc.state.ExitedAt = nil
+		proc.stopReason = ""
+		proc.stopMessage = ""
+		m.startHealthMonitorLocked(proc)
 		m.mu.Unlock()
 		return nil
 	}
@@ -203,6 +235,8 @@ func (m *Manager) Start(taskID string) error {
 	proc.state.LastError = ""
 	proc.state.ExitCode = nil
 	proc.state.ExitedAt = nil
+	proc.stopReason = ""
+	proc.stopMessage = ""
 
 	workdir := proc.task.WorkDir
 	if workdir == "" {
@@ -217,6 +251,19 @@ func (m *Manager) Start(taskID string) error {
 
 	stdoutPath := filepath.Join("data", "logs", proc.task.ID, "stdout.log")
 	stderrPath := filepath.Join("data", "logs", proc.task.ID, "stderr.log")
+
+	if err := rotateLogIfNeeded(stdoutPath); err != nil {
+		proc.state.Status = StatusFailed
+		proc.state.LastError = err.Error()
+		m.mu.Unlock()
+		return err
+	}
+	if err := rotateLogIfNeeded(stderrPath); err != nil {
+		proc.state.Status = StatusFailed
+		proc.state.LastError = err.Error()
+		m.mu.Unlock()
+		return err
+	}
 
 	stdoutFile, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -261,6 +308,7 @@ func (m *Manager) Start(taskID string) error {
 	proc.state.PID = cmd.Process.Pid
 	proc.state.StartedAt = &now
 	proc.state.LastError = ""
+	m.startHealthMonitorLocked(proc)
 	m.mu.Unlock()
 
 	go m.wait(taskID, cmd, stdoutFile, stderrFile, proc.done)
@@ -268,19 +316,30 @@ func (m *Manager) Start(taskID string) error {
 }
 
 func (m *Manager) Stop(taskID string) error {
+	return m.stopWithReason(taskID, stopReasonUser, "", nil)
+}
+
+func (m *Manager) stopWithReason(taskID string, reason stopReason, message string, healthStop chan struct{}) error {
 	m.mu.Lock()
 	proc, ok := m.procs[taskID]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("task %q not found", taskID)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
 	}
 	if proc.state.Status == StatusStopped || proc.state.Status == StatusExited || proc.state.Status == StatusFailed {
+		m.mu.Unlock()
+		return nil
+	}
+	if healthStop != nil && proc.healthStop != healthStop {
 		m.mu.Unlock()
 		return nil
 	}
 	if proc.cmd == nil && proc.state.PID > 0 {
 		pid := proc.state.PID
 		proc.state.Status = StatusStopping
+		proc.stopReason = reason
+		proc.stopMessage = message
+		m.stopHealthMonitorLocked(proc)
 		m.mu.Unlock()
 
 		if err := killProcessTree(pid); err != nil {
@@ -290,22 +349,28 @@ func (m *Manager) Stop(taskID string) error {
 		m.mu.Lock()
 		if current, exists := m.procs[taskID]; exists {
 			now := time.Now()
-			current.state.Status = StatusStopped
 			current.state.PID = 0
 			current.state.ExitedAt = &now
-			current.state.LastError = ""
+			_, _, _ = m.finalizeStopLocked(current)
 		}
 		m.mu.Unlock()
 		return nil
 	}
 	if proc.cmd == nil || proc.cmd.Process == nil {
-		proc.state.Status = StatusStopped
+		proc.state.Status = StatusStopping
+		proc.stopReason = reason
+		proc.stopMessage = message
+		m.stopHealthMonitorLocked(proc)
 		proc.state.PID = 0
+		_, _, _ = m.finalizeStopLocked(proc)
 		m.mu.Unlock()
 		return nil
 	}
 
 	proc.state.Status = StatusStopping
+	proc.stopReason = reason
+	proc.stopMessage = message
+	m.stopHealthMonitorLocked(proc)
 	cmd := proc.cmd
 	done := proc.done
 	timeout := time.Duration(proc.task.StopTimeoutSec) * time.Second
@@ -314,7 +379,7 @@ func (m *Manager) Stop(taskID string) error {
 	}
 	m.mu.Unlock()
 
-	_ = cmd.Process.Signal(os.Interrupt)
+	_ = requestProcessStop(cmd)
 
 	select {
 	case <-time.After(timeout):
@@ -348,6 +413,7 @@ func (m *Manager) wait(taskID string, cmd *exec.Cmd, stdoutFile, stderrFile *os.
 	proc.done = nil
 	proc.state.PID = 0
 	proc.state.ExitedAt = &now
+	m.stopHealthMonitorLocked(proc)
 
 	exitCode := 0
 	if cmd.ProcessState != nil {
@@ -355,30 +421,171 @@ func (m *Manager) wait(taskID string, cmd *exec.Cmd, stdoutFile, stderrFile *os.
 	}
 	proc.state.ExitCode = &exitCode
 
-	if err != nil {
-		if proc.state.Status == StatusStopping {
-			proc.state.Status = StatusStopped
-			proc.state.LastError = ""
-			m.mu.Unlock()
-			return
-		}
-		proc.state.Status = StatusExited
-		proc.state.LastError = err.Error()
-		shouldRestart := proc.task.RestartOnCrash
-		restartTaskID := proc.state.TaskID
+	if proc.state.Status == StatusStopping {
+		restartTaskID, delaySec, shouldRestart := m.finalizeStopLocked(proc)
 		m.mu.Unlock()
 		if shouldRestart {
-			go func() {
-				time.Sleep(2 * time.Second)
-				_ = m.Start(restartTaskID)
-			}()
+			go m.scheduleRestart(restartTaskID, delaySec)
+		}
+		return
+	}
+
+	if err != nil {
+		proc.state.Status = StatusExited
+		proc.state.LastError = err.Error()
+		restartTaskID, delaySec, shouldRestart := m.prepareRestartLocked(proc)
+		m.mu.Unlock()
+		if shouldRestart {
+			go m.scheduleRestart(restartTaskID, delaySec)
 		}
 		return
 	}
 
 	proc.state.Status = StatusStopped
 	proc.state.LastError = ""
+	proc.restartCount = 0
+	proc.healthFailures = 0
 	m.mu.Unlock()
+}
+
+func (m *Manager) startHealthMonitorLocked(proc *managedProcess) {
+	m.stopHealthMonitorLocked(proc)
+	if proc.task.HealthCheckURL == "" {
+		return
+	}
+
+	stopCh := make(chan struct{})
+	proc.healthStop = stopCh
+	proc.healthFailures = 0
+
+	intervalSec := proc.task.HealthCheckIntervalSec
+	if intervalSec <= 0 {
+		intervalSec = 10
+	}
+	failureThreshold := proc.task.HealthCheckFailureThreshold
+	if failureThreshold <= 0 {
+		failureThreshold = 3
+	}
+
+	go m.runHealthMonitor(proc.task.ID, proc.task.HealthCheckURL, intervalSec, failureThreshold, stopCh)
+}
+
+func (m *Manager) stopHealthMonitorLocked(proc *managedProcess) {
+	if proc.healthStop != nil {
+		close(proc.healthStop)
+		proc.healthStop = nil
+	}
+	proc.healthFailures = 0
+}
+
+func (m *Manager) runHealthMonitor(taskID string, healthURL string, intervalSec int, failureThreshold int, stopCh chan struct{}) {
+	timeout := 5 * time.Second
+	if intervalSec > 0 && time.Duration(intervalSec)*time.Second < timeout {
+		timeout = time.Duration(intervalSec) * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	ticker := time.NewTicker(time.Duration(intervalSec) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			if err := performHealthCheck(client, healthURL); err != nil {
+				message := fmt.Sprintf("health check failed: %v", err)
+				if m.recordHealthFailure(taskID, stopCh, message, failureThreshold) {
+					_ = m.stopWithReason(taskID, stopReasonHealth, message, stopCh)
+					return
+				}
+				continue
+			}
+			m.recordHealthSuccess(taskID, stopCh)
+		}
+	}
+}
+
+func performHealthCheck(client *http.Client, healthURL string) error {
+	req, err := http.NewRequest(http.MethodGet, healthURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusBadRequest {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (m *Manager) recordHealthFailure(taskID string, stopCh chan struct{}, message string, threshold int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	proc, ok := m.procs[taskID]
+	if !ok || proc.healthStop != stopCh || !isRunningStatus(proc.state.Status) {
+		return false
+	}
+
+	proc.healthFailures++
+	proc.state.LastError = message
+	return proc.healthFailures >= threshold
+}
+
+func (m *Manager) recordHealthSuccess(taskID string, stopCh chan struct{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	proc, ok := m.procs[taskID]
+	if !ok || proc.healthStop != stopCh || !isRunningStatus(proc.state.Status) {
+		return
+	}
+	proc.healthFailures = 0
+	if strings.HasPrefix(proc.state.LastError, "health check failed:") {
+		proc.state.LastError = ""
+	}
+}
+
+func (m *Manager) finalizeStopLocked(proc *managedProcess) (string, int, bool) {
+	reason := proc.stopReason
+	message := proc.stopMessage
+	proc.stopReason = ""
+	proc.stopMessage = ""
+	proc.healthFailures = 0
+
+	if reason == stopReasonHealth {
+		proc.state.Status = StatusFailed
+		proc.state.LastError = message
+		return m.prepareRestartLocked(proc)
+	}
+
+	proc.state.Status = StatusStopped
+	proc.state.LastError = ""
+	proc.restartCount = 0
+	return "", 0, false
+}
+
+func (m *Manager) prepareRestartLocked(proc *managedProcess) (string, int, bool) {
+	delaySec := proc.task.RestartDelaySec
+	if delaySec <= 0 {
+		delaySec = 2
+	}
+
+	shouldRestart := proc.task.RestartOnCrash
+	proc.restartCount++
+	if proc.task.MaxRestartCount > 0 && proc.restartCount > proc.task.MaxRestartCount {
+		shouldRestart = false
+	}
+	return proc.state.TaskID, delaySec, shouldRestart
+}
+
+func (m *Manager) scheduleRestart(taskID string, delaySec int) {
+	time.Sleep(time.Duration(delaySec) * time.Second)
+	_ = m.Start(taskID)
 }
 
 func resolveProgramPath(program string, workdir string) string {
@@ -401,4 +608,32 @@ func resolveProgramPath(program string, workdir string) string {
 
 func isRunningStatus(status string) bool {
 	return status == StatusRunning || status == StatusStarting || status == StatusStopping
+}
+
+func rotateLogIfNeeded(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if info.Size() < maxLogSizeBytes {
+		return nil
+	}
+
+	oldest := fmt.Sprintf("%s.%d", path, maxLogBackups)
+	if err := os.Remove(oldest); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	for i := maxLogBackups - 1; i >= 1; i-- {
+		src := fmt.Sprintf("%s.%d", path, i)
+		dst := fmt.Sprintf("%s.%d", path, i+1)
+		if err := os.Rename(src, dst); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+
+	return os.Rename(path, path+".1")
 }

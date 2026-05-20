@@ -9,9 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/getlantern/systray"
+	rootassets "tray"
 	"tray/internal/buildinfo"
 	"tray/internal/process"
-	"github.com/getlantern/systray"
 )
 
 type trayTaskItem struct {
@@ -22,6 +23,7 @@ type trayTaskItem struct {
 type trayController struct {
 	rt        *Runtime
 	mu        sync.Mutex
+	taskRoot  *systray.MenuItem
 	taskItems map[string]*trayTaskItem
 }
 
@@ -40,15 +42,18 @@ func runTray(rt *Runtime) error {
 }
 
 func (c *trayController) onReady() {
+	if len(rootassets.TrayIcon) > 0 {
+		systray.SetIcon(rootassets.TrayIcon)
+	}
 	systray.SetTitle("Tray Cmd")
 	systray.SetTooltip("Tray Command Manager")
 
 	openItem := systray.AddMenuItem("打开控制面板", "Open Dashboard")
 	systray.AddSeparator()
+	c.taskRoot = systray.AddMenuItem("任务", "Task controls")
 	c.syncTaskMenus()
 	systray.AddSeparator()
-	aboutRoot := systray.AddMenuItem("About / Version", "Build information")
-	c.initAboutMenu(aboutRoot)
+	c.initVersionMenu()
 	systray.AddSeparator()
 	quitItem := systray.AddMenuItem("退出", "Quit the tray app")
 
@@ -81,7 +86,7 @@ func (c *trayController) syncTaskMenus() {
 		seen[cfg.ID] = struct{}{}
 		entry, ok := c.taskItems[cfg.ID]
 		if !ok {
-			item := systray.AddMenuItem("", "")
+			item := c.taskRoot.AddSubMenuItem("", "")
 			entry = &trayTaskItem{
 				taskID: cfg.ID,
 				item:   item,
@@ -153,23 +158,9 @@ func isTaskRunning(status string) bool {
 	return status == process.StatusRunning || status == process.StatusStarting || status == process.StatusStopping
 }
 
-func (c *trayController) initAboutMenu(root *systray.MenuItem) {
+func (c *trayController) initVersionMenu() {
 	info := buildinfo.Current()
-
-	titleItem := root.AddSubMenuItem("Tray Command Manager", "Application")
-	titleItem.Disable()
-
-	versionItem := root.AddSubMenuItem("Version: "+info.Version, "Version")
-	versionItem.Disable()
-
-	commitItem := root.AddSubMenuItem("Commit: "+info.Commit, "Commit")
-	commitItem.Disable()
-
-	platformItem := root.AddSubMenuItem("Platform: "+info.Platform, "Platform")
-	platformItem.Disable()
-
-	buildTimeItem := root.AddSubMenuItem("Build: "+info.BuildTime, "Build time")
-	buildTimeItem.Disable()
+	_ = systray.AddMenuItem("Version: "+info.Version, "Version")
 }
 
 func openBrowser(url string) {
