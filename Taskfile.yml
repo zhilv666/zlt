@@ -50,3 +50,8 @@ tasks:
     desc: Create macOS release directory in dist/
     cmds:
       - sh ./scripts/release.sh darwin amd64
+
+  clean:dist:
+    desc: Remove generated release artifacts from dist/
+    cmds:
+      - sh -c "rm -rf ./dist"

@@ -40,3 +40,14 @@ Target capabilities:
 - [x] Add build metadata to release artifacts
 - [x] Add cross-platform build tasks
 - [x] Verify build and runtime behavior
+
+## Long-Term Plan
+
+- [x] Prepare v0.1.0 release surface
+- [x] Add automated tests for core modules
+- [ ] Harden runtime edge-case handling
+- [ ] Refine log rotation and retention
+- [ ] Split embedded web assets into standalone files
+- [ ] Expand task model with health checks and restart policies
+- [ ] Implement full cross-platform runtime behavior
+- [ ] Introduce realtime event streaming for status and logs
