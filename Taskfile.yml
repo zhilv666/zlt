@@ -1,0 +1,17 @@
+version: '3'
+
+tasks:
+  version:
+    desc: Print version metadata used for builds
+    cmds:
+      - sh ./scripts/version.sh
+
+  build:
+    desc: Build release artifact to dist/
+    cmds:
+      - sh -c "mkdir -p ./dist && ./scripts/build.sh ./dist/tray-windows-amd64.exe windows amd64"
+
+  build:current:
+    desc: Build tray.exe for current host
+    cmds:
+      - sh ./scripts/build.sh ./tray.exe

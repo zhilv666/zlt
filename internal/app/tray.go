@@ -41,11 +41,11 @@ func (c *trayController) onReady() {
 	systray.SetTitle("Tray Cmd")
 	systray.SetTooltip("Tray Command Manager")
 
-	openItem := systray.AddMenuItem("Open Dashboard", "Open local dashboard")
+	openItem := systray.AddMenuItem("打开控制面板", "Open Dashboard")
 	systray.AddSeparator()
-	c.root = systray.AddMenuItem("任务", "Tasks")
+	c.root = systray.AddMenuItem("任务控制", "Tasks")
 	systray.AddSeparator()
-	quitItem := systray.AddMenuItem("Quit", "Quit the tray app")
+	quitItem := systray.AddMenuItem("退出", "Quit the tray app")
 
 	c.syncTaskMenus()
 
@@ -116,20 +116,20 @@ func (c *trayController) listenTaskItem(entry *trayTaskItem) {
 func (c *trayController) refreshTaskItem(taskID string, taskName string, item *systray.MenuItem) {
 	state, ok := c.rt.Manager.State(taskID)
 	if !ok || !isTaskRunning(state.Status) {
-		item.SetTitle("启动 " + taskName)
+		item.SetTitle("▶ 启动 " + taskName)
 		item.SetTooltip("Start " + taskName)
 		item.Enable()
 		return
 	}
 
 	if state.Status == process.StatusStarting || state.Status == process.StatusStopping {
-		item.SetTitle("处理中 " + taskName)
+		item.SetTitle("⏳ 处理中 " + taskName)
 		item.SetTooltip("Busy " + taskName)
 		item.Disable()
 		return
 	}
 
-	item.SetTitle("停止 " + taskName)
+	item.SetTitle("■ 停止 " + taskName)
 	item.SetTooltip("Stop " + taskName)
 	item.Enable()
 }

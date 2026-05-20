@@ -1,7 +1,7 @@
 .gocache/
 .gomodcache/
-data/logs/
-tray.exe
+*.exe
 *.db
 *.sqlite
 *.sqlite3
+data/
