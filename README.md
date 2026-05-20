@@ -1,23 +1,36 @@
 # 驻令台 / Tray Command Manager
 
-一个基于 Go 的本地托盘命令管理器。
+> 一个把“托盘快速启停”和“浏览器可视化管理”结合在一起的本地任务管理器。
 
-它把“常驻托盘的快速启停”和“浏览器里的任务管理”拆开处理：
+![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-4E5EE4)
+![Storage](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite)
+![UI](https://img.shields.io/badge/UI-Tray%20%2B%20Web-111827)
 
-- 托盘：负责快速启动、停止、查看版本
-- 浏览器：负责管理任务、查看状态、查看日志、调整策略
-
-适合这类场景：
+驻令台适合这类本地服务管理场景：
 
 - 把 `openlist.exe server`、`gitea web`、脚本服务等常驻任务挂到托盘
 - 不想每次都手敲命令，但又需要保留工作目录、参数、日志和重启策略
 - 希望多个本地服务统一管理，而不是每个都单独放一个快捷方式
+
+它把职责拆成两层：
+
+- 托盘：负责快速启动、停止、查看版本
+- 浏览器：负责管理任务、查看状态、查看日志、调整策略
 
 默认示例任务：
 
 ```text
 openlist.exe server
 ```
+
+## 为什么用它
+
+- 不改原命令：直接托管现有命令和工作目录，不需要改造服务程序
+- 控制与管理分离：托盘做快操作，网页做细操作，使用成本低
+- 面向多任务：支持分页、日志筛选、实时状态推送，不会一多就乱
+- 本地优先：配置落地到 SQLite，日志落地到本地文件，不依赖外部服务
+- 发布友好：Windows GUI 构建、版本注入、图标注入和版本化发布都已经打通
 
 ## 功能概览
 
@@ -37,30 +50,48 @@ openlist.exe server
 
 ## 快速开始
 
-1. 构建当前平台可执行文件：
+最短路径：
 
 ```sh
 task build:current
-```
-
-2. 启动程序：
-
-```sh
 ./bin/tray-current
 ```
 
-Windows 下也可以直接构建 GUI 版：
+Windows GUI 版：
 
 ```sh
 task build:windows
 ./bin/tray-windows-amd64.exe
 ```
 
-3. 程序启动后：
+程序启动后：
 
 - Windows 会常驻托盘
 - 浏览器控制面板地址默认是 `http://127.0.0.1:3719`
 - 首次启动会自动创建 `data/tasks.db` 和日志目录
+
+如果你只想快速体验，可以先添加一个最简单的任务：
+
+```text
+ID: openlist
+Name: OpenList
+Program: openlist.exe
+Args: server
+WorkDir: D:\SoftWare\OpenList
+```
+
+## 适合管理什么
+
+- 本地 Web 服务
+- 文件同步、备份、代理、开发辅助服务
+- 带健康检查地址的 HTTP 服务
+- 需要自动拉起、异常重启、日志追踪的命令行程序
+
+不太适合：
+
+- 需要复杂依赖编排的集群型服务
+- 强交互式前台程序
+- 需要严格权限隔离和多用户调度的服务编排场景
 
 ## 任务模型
 
@@ -169,6 +200,12 @@ dist/
 task clean:dist
 ```
 
+版本信息会注入到：
+
+- 托盘菜单中的 `Version`
+- 网页底部版本显示
+- 发布目录中的 `build-info.json`
+
 ## 图标说明
 
 - 根目录的 `ico.ico` 会同时用于：
@@ -208,6 +245,12 @@ task clean:dist
 - Windows：托盘控制 + 浏览器控制面板 + 任务进程管理
 - Linux / macOS：浏览器控制面板 + 任务进程管理
 - 非 Windows 平台使用独立进程组启动和停止任务，避免只杀主进程、不清理子进程
+
+## 当前能力边界
+
+- 托盘完整体验目前以 Windows 为主
+- Linux / macOS 侧重点是运行时控制和浏览器面板
+- 当前是单机本地任务管理器，不是远程节点调度器
 
 ## 开发说明
 
