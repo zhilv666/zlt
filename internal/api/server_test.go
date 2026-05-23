@@ -62,8 +62,16 @@ func (testManager) Start(string) error                        { return nil }
 func (testManager) Stop(string) error                         { return nil }
 func (testManager) ClearLogs(string) error                    { return nil }
 
+type testAutoStart struct {
+	status AutoStartStatus
+}
+
+func (a testAutoStart) Status() (AutoStartStatus, error) { return a.status, nil }
+func (testAutoStart) Enable() error                      { return nil }
+func (testAutoStart) Disable() error                     { return nil }
+
 func TestHandleTaskActionRejectsInvalidLogType(t *testing.T) {
-	server := NewServer(testRuntime{}, testManager{})
+	server := NewServer(testRuntime{}, testManager{}, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/demo/logs?type=bad", nil)
 	rec := httptest.NewRecorder()
 
@@ -98,6 +106,7 @@ func TestBuildTaskItemsMatchesStates(t *testing.T) {
 		testManager{
 			states: []process.RuntimeState{{TaskID: "openlist", Status: process.StatusRunning, PID: 1234}},
 		},
+		nil,
 	)
 
 	items := server.buildTaskItems()
@@ -117,6 +126,7 @@ func TestHandleTaskEventsStreamsInitialSnapshot(t *testing.T) {
 		testManager{
 			states: []process.RuntimeState{{TaskID: "demo", Status: process.StatusStopped}},
 		},
+		nil,
 	).Handler())
 	defer server.Close()
 
@@ -149,5 +159,42 @@ func TestHandleTaskEventsStreamsInitialSnapshot(t *testing.T) {
 	}
 	if !strings.Contains(dataLine, `"id":"demo"`) {
 		t.Fatalf("unexpected data line: %q", dataLine)
+	}
+}
+
+func TestHandleAutoStartMethodGuard(t *testing.T) {
+	server := NewServer(testRuntime{}, testManager{}, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/autostart", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleAutoStart(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
+
+func TestHandleAutoStartStatus(t *testing.T) {
+	server := NewServer(testRuntime{}, testManager{}, testAutoStart{
+		status: AutoStartStatus{Supported: true, Enabled: true, Status: "enabled"},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/autostart", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleAutoStart(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected data type: %#v", resp.Data)
+	}
+	if data["status"] != "enabled" {
+		t.Fatalf("unexpected autostart status: %#v", data)
 	}
 }

@@ -81,28 +81,46 @@ func disableAutostart() error {
 }
 
 func statusAutostart() error {
-	unitPath, err := systemdUnitPath()
+	status, err := getAutoStartStatus()
 	if err != nil {
 		return err
+	}
+	fmt.Printf("autostart: %s\n", status.Status)
+	return nil
+}
+
+func getAutoStartStatus() (AutoStartStatus, error) {
+	unitPath, err := systemdUnitPath()
+	if err != nil {
+		return AutoStartStatus{}, err
 	}
 
 	if _, err := os.Stat(unitPath); err != nil {
 		if os.IsNotExist(err) {
-			fmt.Println("autostart: disabled")
-			return nil
+			return AutoStartStatus{
+				Supported: true,
+				Enabled:   false,
+				Status:    "disabled",
+				UnitPath:  unitPath,
+			}, nil
 		}
-		return err
+		return AutoStartStatus{}, err
 	}
 
 	cmd := exec.Command("systemctl", "--user", "is-enabled", systemdServiceName)
 	output, err := cmd.CombinedOutput()
 	status := strings.TrimSpace(string(output))
 	if err != nil && status == "" {
-		return err
+		return AutoStartStatus{}, err
 	}
 
-	fmt.Printf("autostart: %s\n", status)
-	return nil
+	enabled := status == "enabled"
+	return AutoStartStatus{
+		Supported: true,
+		Enabled:   enabled,
+		Status:    status,
+		UnitPath:  unitPath,
+	}, nil
 }
 
 func systemdUnitPath() (string, error) {

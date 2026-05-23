@@ -71,4 +71,4 @@ Target capabilities:
 
 - [x] Add OS startup/auto-launch support
 - [x] Document startup behavior by platform
-- [ ] Expose auto-launch controls in the web UI
+- [x] Expose auto-launch controls in the web UI

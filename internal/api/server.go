@@ -36,8 +36,23 @@ type ProcessManager interface {
 }
 
 type Server struct {
-	runtime Runtime
-	manager ProcessManager
+	runtime   Runtime
+	manager   ProcessManager
+	autostart AutoStartManager
+}
+
+type AutoStartManager interface {
+	Status() (AutoStartStatus, error)
+	Enable() error
+	Disable() error
+}
+
+type AutoStartStatus struct {
+	Supported bool   `json:"supported"`
+	Enabled   bool   `json:"enabled"`
+	Status    string `json:"status"`
+	UnitPath  string `json:"unit_path,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 type response struct {
@@ -51,10 +66,11 @@ type taskItem struct {
 	Status process.RuntimeState `json:"status"`
 }
 
-func NewServer(runtime Runtime, manager ProcessManager) *Server {
+func NewServer(runtime Runtime, manager ProcessManager, autostart AutoStartManager) *Server {
 	return &Server{
-		runtime: runtime,
-		manager: manager,
+		runtime:   runtime,
+		manager:   manager,
+		autostart: autostart,
 	}
 }
 
@@ -62,6 +78,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/build-info", s.handleBuildInfo)
+	mux.HandleFunc("/api/autostart", s.handleAutoStart)
+	mux.HandleFunc("/api/autostart/", s.handleAutoStart)
 	mux.HandleFunc("/api/events/tasks", s.handleTaskEvents)
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/tasks/", s.handleTaskAction)
@@ -91,6 +109,59 @@ func (s *Server) handleBuildInfo(w http.ResponseWriter, r *http.Request) {
 		Msg:  "ok",
 		Data: buildinfo.Current(),
 	})
+}
+
+func (s *Server) handleAutoStart(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/autostart")
+	switch path {
+	case "":
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+			return
+		}
+		if s.autostart == nil {
+			writeJSON(w, http.StatusOK, response{Code: 0, Msg: "ok", Data: AutoStartStatus{Supported: false, Status: "unsupported"}})
+			return
+		}
+		status, err := s.autostart.Status()
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, response{Code: 0, Msg: "ok", Data: status})
+	case "/enable":
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+			return
+		}
+		if s.autostart == nil {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: "autostart is not available"})
+			return
+		}
+		if err := s.autostart.Enable(); err != nil {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+			return
+		}
+		status, _ := s.autostart.Status()
+		writeJSON(w, http.StatusOK, response{Code: 0, Msg: "enabled", Data: status})
+	case "/disable":
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+			return
+		}
+		if s.autostart == nil {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: "autostart is not available"})
+			return
+		}
+		if err := s.autostart.Disable(); err != nil {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+			return
+		}
+		status, _ := s.autostart.Status()
+		writeJSON(w, http.StatusOK, response{Code: 0, Msg: "disabled", Data: status})
+	default:
+		http.NotFound(w, r)
+	}
 }
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
