@@ -44,7 +44,7 @@ func RunWithOptions(opts RunOptions) error {
 }
 
 func newHTTPServer(runtime *Runtime, addr string) *http.Server {
-	apiServer := api.NewServer(runtime, runtime)
+	apiServer := api.NewServer(runtime, runtime, autoStartAPIAdapter{})
 	return &http.Server{
 		Addr:    addr,
 		Handler: apiServer.Handler(),
