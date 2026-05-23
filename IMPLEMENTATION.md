@@ -69,6 +69,6 @@ Target capabilities:
 
 ### 3. Startup automation
 
-- [ ] Add OS startup/auto-launch support
-- [ ] Document startup behavior by platform
+- [x] Add OS startup/auto-launch support
+- [x] Document startup behavior by platform
 - [ ] Expose auto-launch controls in the web UI

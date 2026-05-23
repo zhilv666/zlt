@@ -30,6 +30,8 @@ func Execute(args []string) error {
 		return restartCommand(args[1:])
 	case "status":
 		return statusCommand(args[1:])
+	case "autostart":
+		return autostartCommand(args[1:])
 	default:
 		if runtime.GOOS == "linux" {
 			return runCommand(args)
