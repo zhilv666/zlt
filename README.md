@@ -59,6 +59,16 @@ Linux 无界面运行：
 ./bin/tray-linux-amd64 restart
 ```
 
+Linux 开机自启：
+
+```sh
+./bin/tray-linux-amd64 autostart enable
+./bin/tray-linux-amd64 autostart status
+./bin/tray-linux-amd64 autostart disable
+```
+
+当前实现基于 `systemd --user`。
+
 示例任务：
 
 ```text
