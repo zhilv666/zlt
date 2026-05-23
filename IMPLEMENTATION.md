@@ -56,16 +56,16 @@ Target capabilities:
 
 ### 1. Task discovery
 
-- [ ] Add task list search and filter
-- [ ] Improve empty-state hints for filtered results
+- [x] Add task list search and filter
+- [x] Improve empty-state hints for filtered results
 
 ### 2. Linux headless mode
 
-- [ ] Add `run` command for foreground/background service mode
-- [ ] Add `start` subcommand for daemon/background launch
-- [ ] Add `stop` subcommand for command-managed task shutdown
-- [ ] Add `restart` subcommand for command-managed task restart
-- [ ] Keep web UI available without tray on Linux servers
+- [x] Add `run` command for foreground/background service mode
+- [x] Add `start` subcommand for daemon/background launch
+- [x] Add `stop` subcommand for command-managed task shutdown
+- [x] Add `restart` subcommand for command-managed task restart
+- [x] Keep web UI available without tray on Linux servers
 
 ### 3. Startup automation
 

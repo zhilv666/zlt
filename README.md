@@ -49,6 +49,16 @@ task build:windows
 http://127.0.0.1:3719
 ```
 
+Linux 无界面运行：
+
+```sh
+./bin/tray-linux-amd64 run
+./bin/tray-linux-amd64 start
+./bin/tray-linux-amd64 status
+./bin/tray-linux-amd64 stop
+./bin/tray-linux-amd64 restart
+```
+
 示例任务：
 
 ```text

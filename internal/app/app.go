@@ -8,13 +8,28 @@ import (
 	"tray/internal/buildinfo"
 )
 
+const defaultHTTPAddr = "127.0.0.1:3719"
+
 func Run() error {
+	return RunWithOptions(DefaultRunOptions())
+}
+
+func RunWithOptions(opts RunOptions) error {
 	runtime, err := NewRuntime()
 	if err != nil {
 		return err
 	}
 
-	runtime.HTTP = newHTTPServer(runtime)
+	var lock *pidLock
+	if opts.PIDFile != "" {
+		lock, err = acquirePIDFile(opts.PIDFile)
+		if err != nil {
+			return err
+		}
+		defer lock.Release()
+	}
+
+	runtime.HTTP = newHTTPServer(runtime, opts.Addr)
 
 	if err := runtime.StartHTTP(); err != nil {
 		return err
@@ -22,13 +37,24 @@ func Run() error {
 
 	log.Printf("tray starting: %s", buildinfo.Summary())
 
+	if opts.Headless {
+		return runHeadless(runtime)
+	}
 	return runTray(runtime)
 }
 
-func newHTTPServer(runtime *Runtime) *http.Server {
+func newHTTPServer(runtime *Runtime, addr string) *http.Server {
 	apiServer := api.NewServer(runtime, runtime)
 	return &http.Server{
-		Addr:    "127.0.0.1:3719",
+		Addr:    addr,
 		Handler: apiServer.Handler(),
+	}
+}
+
+func DefaultRunOptions() RunOptions {
+	return RunOptions{
+		Addr:     defaultHTTPAddr,
+		Headless: false,
+		PIDFile:  "",
 	}
 }
