@@ -45,8 +45,8 @@ func (c *trayController) onReady() {
 	if len(rootassets.TrayIcon) > 0 {
 		systray.SetIcon(rootassets.TrayIcon)
 	}
-	systray.SetTitle("Tray Cmd")
-	systray.SetTooltip("Tray Command Manager")
+	systray.SetTitle("驻令台")
+	systray.SetTooltip("驻令台")
 
 	openItem := systray.AddMenuItem("打开控制面板", "Open Dashboard")
 	systray.AddSeparator()

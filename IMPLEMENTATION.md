@@ -1,4 +1,4 @@
-# Tray Command Manager - Implementation Checklist
+# 驻令台 - Implementation Checklist
 
 ## MVP
 
