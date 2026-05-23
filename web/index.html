@@ -384,6 +384,18 @@
       flex: 1 1 240px;
       min-width: 220px;
     }
+
+    .task-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .task-toolbar-search {
+      flex: 1 1 260px;
+      min-width: 220px;
+    }
     
     .log-viewer {
       background: #1e1e1e;
@@ -593,7 +605,10 @@
           <div class="card-title">
             所有任务
           </div>
-          <div style="display: flex; gap: 0.75rem;">
+          <div class="task-toolbar">
+            <div class="task-toolbar-search">
+              <input id="task-search" class="form-control" placeholder="搜索任务名称、ID、命令或工作目录">
+            </div>
             <button class="btn btn-sm" onclick="exportTasks()">
               导出任务
             </button>
@@ -761,6 +776,7 @@
     let tasksEventSource = null;
     let logsEventSource = null;
     let currentLogStreamKey = '';
+    let currentTaskSearch = '';
 
     document.getElementById('current-year').textContent = new Date().getFullYear();
 
@@ -799,6 +815,24 @@
       if (page < 1) return 1;
       if (page > totalPages) return totalPages;
       return page;
+    }
+
+    function getFilteredTasks() {
+      const keyword = String(currentTaskSearch || '').trim().toLowerCase();
+      if (!keyword) {
+        return currentTasks;
+      }
+      return currentTasks.filter((item) => {
+        const task = item.task || {};
+        const haystack = [
+          task.id,
+          task.name,
+          task.program,
+          (task.args || []).join(' '),
+          task.workdir
+        ].join(' ').toLowerCase();
+        return haystack.includes(keyword);
+      });
     }
 
     function getFilteredLogTasks() {
@@ -932,16 +966,17 @@
     function renderTasks(items) {
       const root = document.getElementById('task-list');
       currentTasks = items;
+      const filteredItems = getFilteredTasks();
 
       if (pendingTaskFocusId) {
-        const targetIndex = items.findIndex((item) => item.task.id === pendingTaskFocusId);
+        const targetIndex = filteredItems.findIndex((item) => item.task.id === pendingTaskFocusId);
         if (targetIndex >= 0) {
           currentTaskPage = Math.floor(targetIndex / currentTaskPageSize) + 1;
         }
         pendingTaskFocusId = '';
       }
 
-      updateTaskPagination(items.length);
+      updateTaskPagination(filteredItems.length);
 
       if (items.length === 0) {
         root.innerHTML = '<div class="empty-state">暂无任务，请点击右上方“添加任务”按钮。</div>';
@@ -949,10 +984,16 @@
         return;
       }
 
+      if (filteredItems.length === 0) {
+        root.innerHTML = '<div class="empty-state">没有找到匹配的任务，请调整搜索条件。</div>';
+        populateLogTaskOptions();
+        return;
+      }
+
       root.innerHTML = '';
 
       const start = (currentTaskPage - 1) * currentTaskPageSize;
-      const pageItems = items.slice(start, start + currentTaskPageSize);
+      const pageItems = filteredItems.slice(start, start + currentTaskPageSize);
 
       pageItems.forEach(item => {
         const status = item.status.status || 'stopped';
@@ -1306,6 +1347,11 @@
     // Trigger task selection change
     document.getElementById('task-page-size').addEventListener('change', (event) => {
       currentTaskPageSize = parseInt(event.target.value || '10', 10);
+      currentTaskPage = 1;
+      renderTasks(currentTasks);
+    });
+    document.getElementById('task-search').addEventListener('input', (event) => {
+      currentTaskSearch = String(event.target.value || '');
       currentTaskPage = 1;
       renderTasks(currentTasks);
     });
