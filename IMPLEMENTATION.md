@@ -51,3 +51,24 @@ Target capabilities:
 - [x] Expand task model with health checks and restart policies
 - [x] Implement full cross-platform runtime behavior
 - [x] Introduce realtime event streaming for status and logs
+
+## Current Delivery
+
+### 1. Task discovery
+
+- [ ] Add task list search and filter
+- [ ] Improve empty-state hints for filtered results
+
+### 2. Linux headless mode
+
+- [ ] Add `run` command for foreground/background service mode
+- [ ] Add `start` subcommand for daemon/background launch
+- [ ] Add `stop` subcommand for command-managed task shutdown
+- [ ] Add `restart` subcommand for command-managed task restart
+- [ ] Keep web UI available without tray on Linux servers
+
+### 3. Startup automation
+
+- [ ] Add OS startup/auto-launch support
+- [ ] Document startup behavior by platform
+- [ ] Expose auto-launch controls in the web UI
