@@ -279,6 +279,18 @@ task release:linux
 task release:darwin
 ```
 
+GitHub Actions 已内置两套工作流：
+
+- `CI`：在 `push main` 和 `pull request` 时自动执行 `go test ./...` 与跨平台构建检查
+- `Release`：在推送 `v*` 标签时自动打包 Windows、Linux、macOS 产物，并发布到 GitHub Release
+
+发布 GitHub 版本的推荐流程：
+
+```sh
+git tag v0.2.1
+git push origin main --tags
+```
+
 发布目录：
 
 ```text
@@ -290,6 +302,7 @@ dist/<version>/
 - Windows 产物输出为 `.exe`
 - Linux 和 macOS 产物输出为 `.tar.gz`
 - Linux 和 macOS 压缩包在打包前会自动写入可执行权限
+- GitHub Release 会额外上传 `SHA256SUMS.txt` 供校验使用
 
 ## 开发
 

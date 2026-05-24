@@ -35,6 +35,7 @@ Target capabilities:
 - [x] Add build metadata to release artifacts
 - [x] Add cross-platform build tasks
 - [x] Verify build and runtime behavior
+- [x] Add GitHub Actions CI and release automation
 
 ## Long-Term Plan
 

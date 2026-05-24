@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Package (${{ matrix.goos }}-${{ matrix.goarch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+          - runner: macos-latest
+            goos: darwin
+            goarch: amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build release package
+        shell: bash
+        run: |
+          sh ./scripts/release.sh "${{ matrix.goos }}" "${{ matrix.goarch }}"
+          mkdir -p release-assets
+          cp "dist/${GITHUB_REF_NAME}"/zlt-* release-assets/
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
+          fi
+          gh release upload "${GITHUB_REF_NAME}" release-assets/* --clobber
+
