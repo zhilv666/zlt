@@ -1,19 +1,19 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package app
 
 import "errors"
 
 func enableAutostart() error {
-	return errors.New("autostart is currently supported on linux only")
+	return errors.New("autostart is currently unsupported on this platform")
 }
 
 func disableAutostart() error {
-	return errors.New("autostart is currently supported on linux only")
+	return errors.New("autostart is currently unsupported on this platform")
 }
 
 func statusAutostart() error {
-	return errors.New("autostart is currently supported on linux only")
+	return errors.New("autostart is currently unsupported on this platform")
 }
 
 func getAutoStartStatus() (AutoStartStatus, error) {
@@ -21,6 +21,6 @@ func getAutoStartStatus() (AutoStartStatus, error) {
 		Supported: false,
 		Enabled:   false,
 		Status:    "unsupported",
-		Message:   "autostart is currently supported on linux only",
+		Message:   "autostart is currently unsupported on this platform",
 	}, nil
 }

@@ -297,3 +297,20 @@ func (r *Runtime) RestartTask(taskID string) error {
 	}
 	return r.Manager.Start(taskID)
 }
+
+func (r *Runtime) SetRestartOnCrash(taskID string, enabled bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for i := range r.Tasks {
+		if r.Tasks[i].ID != taskID {
+			continue
+		}
+
+		r.Tasks[i].RestartOnCrash = enabled
+		r.Manager.UpsertTask(r.Tasks[i])
+		return r.TaskStore.Save(r.Tasks)
+	}
+
+	return fmt.Errorf("%w: %s", process.ErrTaskNotFound, taskID)
+}

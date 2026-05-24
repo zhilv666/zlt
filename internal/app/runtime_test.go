@@ -151,3 +151,26 @@ func TestRestartTaskReturnsNotFound(t *testing.T) {
 		t.Fatalf("expected task not found error, got %v", err)
 	}
 }
+
+func TestSetRestartOnCrashPersists(t *testing.T) {
+	cfg := task.DefaultOpenListTask()
+	cfg.RestartOnCrash = false
+	rt := newTestRuntime(t, []task.Config{cfg})
+
+	if err := rt.SetRestartOnCrash(cfg.ID, true); err != nil {
+		t.Fatalf("set restart on crash: %v", err)
+	}
+
+	tasks := rt.ListTasks()
+	if len(tasks) != 1 || !tasks[0].RestartOnCrash {
+		t.Fatalf("unexpected runtime tasks: %+v", tasks)
+	}
+
+	loaded, err := rt.TaskStore.Load()
+	if err != nil {
+		t.Fatalf("reload tasks: %v", err)
+	}
+	if len(loaded) != 1 || !loaded[0].RestartOnCrash {
+		t.Fatalf("unexpected persisted tasks: %+v", loaded)
+	}
+}

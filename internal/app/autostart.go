@@ -3,7 +3,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"runtime"
 )
 
 type AutoStartStatus struct {
@@ -15,9 +14,6 @@ type AutoStartStatus struct {
 }
 
 func autostartCommand(args []string) error {
-	if runtime.GOOS != "linux" {
-		return errors.New("autostart command is currently supported on linux only")
-	}
 	if len(args) == 0 {
 		return errors.New("usage: autostart <enable|disable|status>")
 	}

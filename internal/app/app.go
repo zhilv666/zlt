@@ -15,6 +15,8 @@ func Run() error {
 }
 
 func RunWithOptions(opts RunOptions) error {
+	initAppLogger()
+
 	runtime, err := NewRuntime()
 	if err != nil {
 		return err

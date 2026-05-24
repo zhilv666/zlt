@@ -13,11 +13,13 @@ import (
 	rootassets "tray"
 	"tray/internal/buildinfo"
 	"tray/internal/process"
+	"tray/internal/task"
 )
 
 type trayTaskItem struct {
-	taskID string
-	item   *systray.MenuItem
+	taskID      string
+	controlItem *systray.MenuItem
+	restartItem *systray.MenuItem
 }
 
 type trayController struct {
@@ -86,29 +88,34 @@ func (c *trayController) syncTaskMenus() {
 		seen[cfg.ID] = struct{}{}
 		entry, ok := c.taskItems[cfg.ID]
 		if !ok {
-			item := c.taskRoot.AddSubMenuItem("", "")
+			controlItem := c.taskRoot.AddSubMenuItem("", "")
+			restartItem := c.taskRoot.AddSubMenuItem("", "")
 			entry = &trayTaskItem{
-				taskID: cfg.ID,
-				item:   item,
+				taskID:      cfg.ID,
+				controlItem: controlItem,
+				restartItem: restartItem,
 			}
 			c.taskItems[cfg.ID] = entry
 
-			go c.listenTaskItem(entry)
+			go c.listenTaskControl(entry)
+			go c.listenTaskRestart(entry)
 		}
-		c.refreshTaskItem(cfg.ID, cfg.Name, entry)
-		entry.item.Show()
+		c.refreshTaskItem(cfg, entry)
+		entry.controlItem.Show()
+		entry.restartItem.Show()
 	}
 
 	for id, entry := range c.taskItems {
 		if _, ok := seen[id]; !ok {
-			entry.item.Hide()
+			entry.controlItem.Hide()
+			entry.restartItem.Hide()
 		}
 	}
 }
 
-func (c *trayController) listenTaskItem(entry *trayTaskItem) {
+func (c *trayController) listenTaskControl(entry *trayTaskItem) {
 	go func() {
-		for range entry.item.ClickedCh {
+		for range entry.controlItem.ClickedCh {
 			state, ok := c.rt.Manager.State(entry.taskID)
 			if ok && isTaskRunning(state.Status) {
 				_ = c.rt.Manager.Stop(entry.taskID)
@@ -116,42 +123,69 @@ func (c *trayController) listenTaskItem(entry *trayTaskItem) {
 				_ = c.rt.Manager.Start(entry.taskID)
 			}
 			c.mu.Lock()
-			name := c.lookupTaskName(entry.taskID)
-			c.refreshTaskItem(entry.taskID, name, entry)
+			cfg, ok := c.lookupTask(entry.taskID)
+			if ok {
+				c.refreshTaskItem(cfg, entry)
+			}
 			c.mu.Unlock()
 		}
 	}()
 }
 
-func (c *trayController) refreshTaskItem(taskID string, taskName string, entry *trayTaskItem) {
-	state, ok := c.rt.Manager.State(taskID)
-	if !ok || !isTaskRunning(state.Status) {
-		entry.item.SetTitle("▶ 启动 " + taskName)
-		entry.item.SetTooltip("Start " + taskName)
-		entry.item.Enable()
-		return
-	}
-
-	if state.Status == process.StatusStarting || state.Status == process.StatusStopping {
-		entry.item.SetTitle("⏳ 处理中 " + taskName)
-		entry.item.SetTooltip("Busy " + taskName)
-		entry.item.Disable()
-		return
-	}
-
-	entry.item.SetTitle("■ 停止 " + taskName)
-	entry.item.SetTooltip("Stop " + taskName)
-	entry.item.Enable()
+func (c *trayController) listenTaskRestart(entry *trayTaskItem) {
+	go func() {
+		for range entry.restartItem.ClickedCh {
+			cfg, ok := c.lookupTask(entry.taskID)
+			if !ok {
+				continue
+			}
+			_ = c.rt.SetRestartOnCrash(entry.taskID, !cfg.RestartOnCrash)
+			c.mu.Lock()
+			cfg, ok = c.lookupTask(entry.taskID)
+			if ok {
+				c.refreshTaskItem(cfg, entry)
+			}
+			c.mu.Unlock()
+		}
+	}()
 }
 
-func (c *trayController) lookupTaskName(taskID string) string {
+func (c *trayController) refreshTaskItem(cfg task.Config, entry *trayTaskItem) {
+	state, ok := c.rt.Manager.State(cfg.ID)
+	if !ok || !isTaskRunning(state.Status) {
+		entry.controlItem.SetTitle("▶ 启动 " + cfg.Name)
+		entry.controlItem.SetTooltip("Start " + cfg.Name)
+		entry.controlItem.Enable()
+	} else if state.Status == process.StatusStarting || state.Status == process.StatusStopping {
+		entry.controlItem.SetTitle("⏳ 处理中 " + cfg.Name)
+		entry.controlItem.SetTooltip("Busy " + cfg.Name)
+		entry.controlItem.Disable()
+	} else {
+		entry.controlItem.SetTitle("■ 停止 " + cfg.Name)
+		entry.controlItem.SetTooltip("Stop " + cfg.Name)
+		entry.controlItem.Enable()
+	}
+
+	if cfg.RestartOnCrash {
+		entry.restartItem.SetTitle("✓ 崩溃自动重启 " + cfg.Name)
+		entry.restartItem.SetTooltip("Disable restart on crash for " + cfg.Name)
+		entry.restartItem.Check()
+	} else {
+		entry.restartItem.SetTitle("○ 崩溃自动重启 " + cfg.Name)
+		entry.restartItem.SetTooltip("Enable restart on crash for " + cfg.Name)
+		entry.restartItem.Uncheck()
+	}
+	entry.restartItem.Enable()
+}
+
+func (c *trayController) lookupTask(taskID string) (task.Config, bool) {
 	tasks := c.rt.ListTasks()
 	for _, cfg := range tasks {
 		if cfg.ID == taskID {
-			return cfg.Name
+			return cfg, true
 		}
 	}
-	return taskID
+	return task.Config{}, false
 }
 
 func isTaskRunning(status string) bool {

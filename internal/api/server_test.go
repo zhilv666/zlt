@@ -198,3 +198,22 @@ func TestHandleAutoStartStatus(t *testing.T) {
 		t.Fatalf("unexpected autostart status: %#v", data)
 	}
 }
+
+func TestHandleAutoStartDisabledFallback(t *testing.T) {
+	server := NewServer(testRuntime{}, testManager{}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/autostart", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleAutoStart(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data == nil {
+		t.Fatalf("expected autostart data")
+	}
+}
