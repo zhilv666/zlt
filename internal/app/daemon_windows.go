@@ -13,7 +13,7 @@ import (
 
 const createNoWindow = 0x08000000
 
-func startDetached(pidFile string) error {
+func startDetached(pidFile string, addr string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -23,8 +23,8 @@ func startDetached(pidFile string) error {
 		return err
 	}
 
-	stdoutPath := filepath.Join("data", "tray-service.out.log")
-	stderrPath := filepath.Join("data", "tray-service.err.log")
+	stdoutPath := filepath.Join("data", "zlt-service.out.log")
+	stderrPath := filepath.Join("data", "zlt-service.err.log")
 	stdoutFile, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
@@ -37,7 +37,11 @@ func startDetached(pidFile string) error {
 	}
 	defer stderrFile.Close()
 
-	cmd := exec.Command(exe, "run")
+	args := []string{"run"}
+	if addr != "" {
+		args = append(args, "--addr", addr)
+	}
+	cmd := exec.Command(exe, args...)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 	cmd.Stdin = nil
@@ -50,7 +54,10 @@ func startDetached(pidFile string) error {
 		return err
 	}
 
-	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", cmd.Process.Pid)), 0o644); err != nil {
+	if _, err := writePIDFile(pidFile, pidFilePayload{
+		PID:  cmd.Process.Pid,
+		Addr: addr,
+	}); err != nil {
 		_ = cmd.Process.Kill()
 		return err
 	}

@@ -1,131 +1,342 @@
 # 驻令台
 
-> 一个把“托盘快速启停”和“浏览器精细管理”合在一起的本地命令管理器。
+> 把“托盘快速启停”和“浏览器精细管理”合在一起的本地命令管理器。
 
 ![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-4E5EE4)
 ![Storage](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite)
-![UI](https://img.shields.io/badge/UI-Tray%20%2B%20Web-111827)
+![UI](https://img.shields.io/badge/UI-System%20Tray%20%2B%20Web-111827)
+![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)
 
-驻令台适合管理这些本地命令：
+驻令台适合管理这些常驻命令：
 
 - `openlist.exe server`
 - `gitea web`
-- 各类常驻脚本和辅助服务
+- `.venv/bin/ncatbot run`
+- `python3 main.py`
+- 其他本地脚本、守护进程、辅助服务
 
-它把职责分成两层：
+它把职责拆成两层：
 
-- 托盘：一键启动、停止、查看版本
-- 浏览器：任务增删改查、日志查看、状态管理
+- 托盘负责：快速启动、停止、退出、查看版本
+- 浏览器负责：任务管理、日志查看、状态观察、参数配置
 
-## 核心能力
+## 命名说明
 
-- 托盘菜单快速启停任务
-- 网页端管理任务和日志
-- 任务列表分页展示
-- 日志支持筛选、自动刷新和滚动查看
-- 支持自动启动、崩溃重启和健康检查
+- 项目名：`驻令台`
+- 仓库名：`zhulingtai`
+- 可执行文件：`zlt`
+
+这三个名字分别服务于不同场景：
+
+- `驻令台` 用于产品展示、文档标题、界面文案
+- `zhulingtai` 用于仓库、Go module、源码路径
+- `zlt` 用于命令行、构建产物和发布包文件名
+
+## 为什么叫“驻令台”
+
+这个名字来自三个意思：
+
+- `驻`：强调常驻运行、后台守护、托盘常驻
+- `令`：强调命令、脚本、服务进程
+- `台`：强调统一管理入口，像一个控制台
+
+它不是单纯的“命令启动器”，而是一个面向本地服务管理的驻留控制台，所以叫“驻令台”。
+
+## 功能特性
+
+- 托盘菜单快速启动和停止任务
+- 浏览器管理任务的增删改查
 - 任务配置持久化到 SQLite
-- 构建信息注入到版本和发布产物
+- 支持任务自动启动
+- 支持异常退出后自动重启
+- 支持健康检查与失败阈值配置
+- 支持任务日志查看、下载、清空
+- 支持系统日志 `data/app.log` 查看
+- 支持 ANSI 彩色日志渲染
+- 支持任务列表搜索、筛选和分页
+- 支持 Linux 无界面运行
+- 支持构建时注入版本、提交、平台、时间等信息
 - Windows 构建自动注入图标
 
-## 快速开始
+## 项目结构
+
+```text
+.
+├── cmd/
+│   └── zlt/             # CLI / GUI 入口
+├── internal/            # 核心实现
+│   ├── api/             # HTTP API
+│   ├── app/             # 运行时、托盘、CLI、自启动
+│   ├── process/         # 进程管理
+│   ├── store/           # SQLite 持久化
+│   └── task/            # 任务模型
+├── scripts/             # 构建与发布脚本
+├── web/                 # 内嵌网页面板
+├── ico.ico              # Windows 图标，固定放仓库根目录
+├── Taskfile.yml         # 常用任务
+└── embed_assets.go      # 静态资源嵌入
+```
+
+## 使用方式
+
+### 1. 构建
+
+当前项目使用 `Taskfile` 管理构建任务：
 
 ```sh
 task build:current
-./bin/tray-current
+task build:windows
+task build:linux
+task build:darwin
+```
+
+构建产物输出到：
+
+```text
+bin/
+```
+
+### 2. 运行
+
+当前平台直接运行：
+
+```sh
+./bin/zlt-current
+```
+
+查看版本：
+
+```sh
+./bin/zlt-current version
 ```
 
 Windows GUI 版：
 
 ```sh
-task build:windows
-./bin/tray-windows-amd64.exe
+./bin/zlt-windows-amd64.exe
 ```
 
-启动后默认访问：
+默认控制面板地址：
 
 ```text
 http://127.0.0.1:3719
 ```
 
-Linux 无界面运行：
+### 3. Linux 无界面模式
 
 ```sh
-./bin/tray-linux-amd64 run
-./bin/tray-linux-amd64 start
-./bin/tray-linux-amd64 status
-./bin/tray-linux-amd64 stop
-./bin/tray-linux-amd64 restart
+./bin/zlt-linux-amd64 run
+./bin/zlt-linux-amd64 start
+./bin/zlt-linux-amd64 status
+./bin/zlt-linux-amd64 stop
+./bin/zlt-linux-amd64 restart
 ```
 
-Linux 开机自启：
+指定监听地址：
 
 ```sh
-./bin/tray-linux-amd64 autostart enable
-./bin/tray-linux-amd64 autostart status
-./bin/tray-linux-amd64 autostart disable
+./bin/zlt-linux-amd64 run --addr 0.0.0.0:3719
+./bin/zlt-linux-amd64 start --addr 0.0.0.0:3719
 ```
 
-当前实现基于 `systemd --user`。
+帮助信息：
 
-示例任务：
-
-```text
-ID: openlist
-Name: OpenList
-Program: openlist.exe
-Args: server
-WorkDir: D:\SoftWare\OpenList
+```sh
+./bin/zlt-linux-amd64 -h
+./bin/zlt-linux-amd64 start -h
+./bin/zlt-linux-amd64 version
 ```
 
-## 任务模型
+### 4. 软件开机自启
 
-每个任务至少包含：
+Linux：
 
-- `id`
-- `name`
-- `program`
-- `args`
-- `workdir`
+```sh
+./bin/zlt-linux-amd64 autostart enable
+./bin/zlt-linux-amd64 autostart status
+./bin/zlt-linux-amd64 autostart disable
+```
 
-常用行为字段：
+当前 Linux 实现基于 `systemd --user`。
 
-- `autostart`
-- `restart_on_crash`
-- `stop_timeout_sec`
-- `restart_delay_sec`
-- `max_restart_count`
-- `health_check_url`
-- `health_check_interval_sec`
-- `health_check_failure_threshold`
+Windows 可在网页里直接查看、启用、停用软件开机自启。
 
-## 构建与发布
+## 任务配置示例
+
+### OpenList
+
+```json
+{
+  "id": "openlist",
+  "name": "OpenList",
+  "program": "openlist.exe",
+  "args": ["server"],
+  "workdir": "D:/SoftWare/OpenList",
+  "env": [],
+  "autostart": false,
+  "restart_on_crash": false,
+  "stop_timeout_sec": 8,
+  "restart_delay_sec": 2,
+  "max_restart_count": 0,
+  "health_check_url": "",
+  "health_check_interval_sec": 0,
+  "health_check_failure_threshold": 0
+}
+```
+
+### Python 脚本
+
+```json
+{
+  "id": "cksd",
+  "name": "cksd",
+  "program": "/usr/bin/python3",
+  "args": ["main.py"],
+  "workdir": "/home/ubuntu/code/cksd",
+  "env": [],
+  "autostart": false,
+  "restart_on_crash": false,
+  "stop_timeout_sec": 8,
+  "restart_delay_sec": 2,
+  "max_restart_count": 0,
+  "health_check_url": "",
+  "health_check_interval_sec": 0,
+  "health_check_failure_threshold": 0
+}
+```
+
+### Python 虚拟环境命令
+
+```json
+{
+  "id": "ncatbot",
+  "name": "ncatbot",
+  "program": "/home/ubuntu/code/ncatbot/.venv/bin/ncatbot",
+  "args": ["run"],
+  "workdir": "/home/ubuntu/code/ncatbot",
+  "env": [],
+  "autostart": false,
+  "restart_on_crash": false,
+  "stop_timeout_sec": 8,
+  "restart_delay_sec": 2,
+  "max_restart_count": 0,
+  "health_check_url": "",
+  "health_check_interval_sec": 0,
+  "health_check_failure_threshold": 0
+}
+```
+
+说明：
+
+- 不需要先执行 `activate`
+- 推荐直接填写虚拟环境中的可执行文件
+- 相同的 `python3 main.py` 会结合工作目录做识别，避免不同项目混淆
+
+## 效果图
+
+当前界面分为两部分：
+
+- 托盘菜单：适合快速启停任务
+- 浏览器面板：适合任务管理和日志查看
+
+建议在开源发布时补充以下截图到仓库中，例如 `docs/images/`：
+
+- 任务列表页
+
+  ![image-20260524172150165](assets/image-20260524172150165.png)
+
+- 日志查看页
+
+  ![image-20260524172229289](assets/image-20260524172229289.png)
+
+- Windows 托盘菜单
+
+  ![image-20260524172325815](assets/image-20260524172325815.png)
+
+- Linux 无界面运行示例
+  ![image-20260524174837383](assets/image-20260524174837383.png)
+
+## 日志说明
+
+任务日志行为：
+
+- 每个任务统一写入 `data/logs/<task_id>/app.log`
+- 旧版本遗留的 `stdout.log` 和 `stderr.log` 仍可兼容读取
+- 网页支持 ANSI 彩色渲染和纯文本切换
+
+系统日志行为：
+
+- 程序自身日志写入 `data/app.log`
+- 网页日志页可直接查看系统日志
+
+## 发布
 
 ```sh
 task version
-task build:current
 task release:windows
 task release:linux
 task release:darwin
 ```
 
-产物目录：
+发布目录：
 
 ```text
-bin/
 dist/<version>/
 ```
 
-## 目录约定
+说明：
 
-- `web/` 保持在仓库根目录
-- `ico.ico` 保持在仓库根目录
-- `data/` 是本地运行数据，不提交
-- `bin/`、`dist/`、`.gocache/`、`.gomodcache/`、`.tools/` 都属于构建产物或本地缓存
+- Windows 产物输出为 `.exe`
+- Linux 和 macOS 产物输出为 `.tar.gz`
+- Linux 和 macOS 压缩包在打包前会自动写入可执行权限
 
-测试命令：
+## 开发
+
+### 环境要求
+
+- Go 1.25+
+- `task`（推荐）
+
+### 常用命令
 
 ```sh
+task version
+task build:current
+task build:windows
+task build:linux
+task build:darwin
 go test ./...
 ```
+
+### 开发约定
+
+- `ico.ico` 固定放在仓库根目录
+- `web/` 保持在仓库根目录
+- `data/` 是本地运行数据目录，不参与提交
+- `bin/`、`dist/`、`.gocache/`、`.gomodcache/`、`.gotmp/`、`.tools/` 都是构建产物或缓存
+
+### 当前实现重点
+
+- 任务配置使用 SQLite 持久化
+- 托盘和网页共享同一套运行时状态
+- 启动时先起托盘，再处理自动启动任务
+- 退出时先停任务，再关闭 HTTP 和托盘
+- Windows、Linux、macOS 都有对应构建流程
+- Go module 名称为 `zhulingtai`
+- 最终用户使用的命令名称为 `zlt`
+
+## 社区支持
+
+<div align="center">
+**学 AI，上 L 站**
+
+[![LINUX DO](https://img.shields.io/badge/LINUX%20DO-社区-gray?style=flat-square)](https://linux.do/) [![社区支持](https://img.shields.io/badge/社区支持-交流-blue?style=flat-square)](https://linux.do/)
+
+本项目在 [LINUX DO](https://linux.do/) 社区发布与交流，感谢佬友们的支持与反馈。
+
+</div>
+
+## 许可证
+
+GPL-3.0 License. See [LICENSE](./LICENSE).

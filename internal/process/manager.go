@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"tray/internal/task"
+	"zhulingtai/internal/task"
 )
 
 const (
@@ -43,8 +43,7 @@ type RuntimeState struct {
 type managedProcess struct {
 	task           task.Config
 	cmd            *exec.Cmd
-	stdout         *os.File
-	stderr         *os.File
+	logFile        *os.File
 	done           chan struct{}
 	healthStop     chan struct{}
 	state          RuntimeState
@@ -139,33 +138,28 @@ func (m *Manager) ClearLogs(taskID string) error {
 		return err
 	}
 
-	stdoutPath := filepath.Join("data", "logs", taskID, "stdout.log")
-	stderrPath := filepath.Join("data", "logs", taskID, "stderr.log")
+	logPath := filepath.Join("data", "logs", taskID, "app.log")
+	legacyStdoutPath := filepath.Join("data", "logs", taskID, "stdout.log")
+	legacyStderrPath := filepath.Join("data", "logs", taskID, "stderr.log")
 
-	if proc.stdout != nil {
-		if err := proc.stdout.Truncate(0); err != nil {
+	if proc.logFile != nil {
+		if err := proc.logFile.Truncate(0); err != nil {
 			return err
 		}
-		if _, err := proc.stdout.Seek(0, 0); err != nil {
+		if _, err := proc.logFile.Seek(0, 0); err != nil {
 			return err
 		}
 	} else {
-		if err := os.WriteFile(stdoutPath, []byte{}, 0o644); err != nil {
+		if err := os.WriteFile(logPath, []byte{}, 0o644); err != nil {
 			return err
 		}
 	}
 
-	if proc.stderr != nil {
-		if err := proc.stderr.Truncate(0); err != nil {
-			return err
-		}
-		if _, err := proc.stderr.Seek(0, 0); err != nil {
-			return err
-		}
-	} else {
-		if err := os.WriteFile(stderrPath, []byte{}, 0o644); err != nil {
-			return err
-		}
+	if err := os.WriteFile(legacyStdoutPath, []byte{}, 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(legacyStderrPath, []byte{}, 0o644); err != nil {
+		return err
 	}
 
 	return nil
@@ -249,33 +243,17 @@ func (m *Manager) Start(taskID string) error {
 		return err
 	}
 
-	stdoutPath := filepath.Join("data", "logs", proc.task.ID, "stdout.log")
-	stderrPath := filepath.Join("data", "logs", proc.task.ID, "stderr.log")
+	logPath := filepath.Join("data", "logs", proc.task.ID, "app.log")
 
-	if err := rotateLogIfNeeded(stdoutPath); err != nil {
-		proc.state.Status = StatusFailed
-		proc.state.LastError = err.Error()
-		m.mu.Unlock()
-		return err
-	}
-	if err := rotateLogIfNeeded(stderrPath); err != nil {
+	if err := rotateLogIfNeeded(logPath); err != nil {
 		proc.state.Status = StatusFailed
 		proc.state.LastError = err.Error()
 		m.mu.Unlock()
 		return err
 	}
 
-	stdoutFile, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		proc.state.Status = StatusFailed
-		proc.state.LastError = err.Error()
-		m.mu.Unlock()
-		return err
-	}
-
-	stderrFile, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		_ = stdoutFile.Close()
 		proc.state.Status = StatusFailed
 		proc.state.LastError = err.Error()
 		m.mu.Unlock()
@@ -286,13 +264,12 @@ func (m *Manager) Start(taskID string) error {
 	cmd := exec.Command(resolvedProgram, proc.task.Args...)
 	cmd.Dir = workdir
 	cmd.Env = append(os.Environ(), proc.task.Env...)
-	cmd.Stdout = stdoutFile
-	cmd.Stderr = stderrFile
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 	prepareCommand(cmd)
 
 	if err := cmd.Start(); err != nil {
-		_ = stdoutFile.Close()
-		_ = stderrFile.Close()
+		_ = logFile.Close()
 		proc.state.Status = StatusFailed
 		proc.state.LastError = fmt.Sprintf("%s (program=%s)", err.Error(), resolvedProgram)
 		m.mu.Unlock()
@@ -301,8 +278,7 @@ func (m *Manager) Start(taskID string) error {
 
 	now := time.Now()
 	proc.cmd = cmd
-	proc.stdout = stdoutFile
-	proc.stderr = stderrFile
+	proc.logFile = logFile
 	proc.done = make(chan struct{})
 	proc.state.Status = StatusRunning
 	proc.state.PID = cmd.Process.Pid
@@ -311,7 +287,7 @@ func (m *Manager) Start(taskID string) error {
 	m.startHealthMonitorLocked(proc)
 	m.mu.Unlock()
 
-	go m.wait(taskID, cmd, stdoutFile, stderrFile, proc.done)
+	go m.wait(taskID, cmd, logFile, proc.done)
 	return nil
 }
 
@@ -392,12 +368,11 @@ func (m *Manager) stopWithReason(taskID string, reason stopReason, message strin
 	return nil
 }
 
-func (m *Manager) wait(taskID string, cmd *exec.Cmd, stdoutFile, stderrFile *os.File, done chan struct{}) {
+func (m *Manager) wait(taskID string, cmd *exec.Cmd, logFile *os.File, done chan struct{}) {
 	err := cmd.Wait()
 	close(done)
 
-	_ = stdoutFile.Close()
-	_ = stderrFile.Close()
+	_ = logFile.Close()
 
 	m.mu.Lock()
 	proc, ok := m.procs[taskID]
@@ -407,8 +382,7 @@ func (m *Manager) wait(taskID string, cmd *exec.Cmd, stdoutFile, stderrFile *os.
 	}
 
 	now := time.Now()
-	proc.stdout = nil
-	proc.stderr = nil
+	proc.logFile = nil
 	proc.cmd = nil
 	proc.done = nil
 	proc.state.PID = 0

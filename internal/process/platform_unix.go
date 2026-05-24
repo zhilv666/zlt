@@ -12,7 +12,7 @@ import (
 	"strings"
 	"syscall"
 
-	"tray/internal/task"
+	"zhulingtai/internal/task"
 )
 
 func prepareCommand(cmd *exec.Cmd) {
@@ -51,6 +51,10 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 	if workdir == "" {
 		workdir = "."
 	}
+	resolvedWorkdir := workdir
+	if abs, err := filepath.Abs(workdir); err == nil {
+		resolvedWorkdir = abs
+	}
 	resolvedProgram := resolveProgramPath(cfg.Program, workdir)
 	if !filepath.IsAbs(resolvedProgram) {
 		if abs, err := filepath.Abs(resolvedProgram); err == nil {
@@ -80,10 +84,44 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 		}
 
 		commandLine := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
-		if commandMatchesProgram(commandLine, resolvedProgram) {
-			return pid, true
+		if !commandMatchesTask(commandLine, resolvedProgram, cfg.Args) {
+			continue
 		}
+		if !processMatchesWorkingDir(pid, resolvedWorkdir) {
+			continue
+		}
+		return pid, true
 	}
 
 	return 0, false
+}
+
+func processMatchesWorkingDir(pid int, expected string) bool {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return true
+	}
+	actual, ok := readLinuxProcessWorkingDir(pid)
+	if !ok {
+		return false
+	}
+	return sameWorkingDir(actual, expected)
+}
+
+func readLinuxProcessWorkingDir(pid int) (string, bool) {
+	if pid <= 0 {
+		return "", false
+	}
+
+	cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+	if err != nil {
+		return "", false
+	}
+	if cwd == "" {
+		return "", false
+	}
+	if abs, err := filepath.Abs(cwd); err == nil {
+		cwd = abs
+	}
+	return cwd, true
 }

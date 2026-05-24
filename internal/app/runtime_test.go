@@ -5,10 +5,21 @@ import (
 	"path/filepath"
 	"testing"
 
-	"tray/internal/process"
-	"tray/internal/store"
-	"tray/internal/task"
+	"zhulingtai/internal/process"
+	"zhulingtai/internal/store"
+	"zhulingtai/internal/task"
 )
+
+func newDummyTask() task.Config {
+	return task.Config{
+		ID:      "dummy",
+		Name:    "Dummy",
+		Program: "__definitely_not_a_real_process__",
+		Args:    []string{},
+		WorkDir: ".",
+		Env:     []string{},
+	}
+}
 
 func newTestRuntime(t *testing.T, tasks []task.Config) *Runtime {
 	t.Helper()
@@ -119,7 +130,7 @@ func TestValidateTask(t *testing.T) {
 }
 
 func TestReplaceTasksRejectsDuplicateID(t *testing.T) {
-	rt := newTestRuntime(t, []task.Config{task.DefaultOpenListTask()})
+	rt := newTestRuntime(t, []task.Config{newDummyTask()})
 
 	err := rt.ReplaceTasks([]task.Config{
 		{ID: "same", Name: "A", Program: "a.exe"},
@@ -130,21 +141,21 @@ func TestReplaceTasksRejectsDuplicateID(t *testing.T) {
 	}
 }
 
-func TestReplaceTasksUsesDefaultWhenEmpty(t *testing.T) {
-	rt := newTestRuntime(t, []task.Config{task.DefaultOpenListTask()})
+func TestReplaceTasksKeepsEmptyWhenEmpty(t *testing.T) {
+	rt := newTestRuntime(t, nil)
 
 	if err := rt.ReplaceTasks(nil); err != nil {
 		t.Fatalf("replace tasks: %v", err)
 	}
 
 	tasks := rt.ListTasks()
-	if len(tasks) != 1 || tasks[0].ID != "openlist" {
+	if len(tasks) != 0 {
 		t.Fatalf("unexpected tasks after replace: %+v", tasks)
 	}
 }
 
 func TestRestartTaskReturnsNotFound(t *testing.T) {
-	rt := newTestRuntime(t, []task.Config{task.DefaultOpenListTask()})
+	rt := newTestRuntime(t, []task.Config{newDummyTask()})
 
 	err := rt.RestartTask("missing")
 	if err == nil || !errors.Is(err, process.ErrTaskNotFound) {
@@ -153,8 +164,12 @@ func TestRestartTaskReturnsNotFound(t *testing.T) {
 }
 
 func TestSetRestartOnCrashPersists(t *testing.T) {
-	cfg := task.DefaultOpenListTask()
-	cfg.RestartOnCrash = false
+	cfg := task.Config{
+		ID:             "demo",
+		Name:           "Demo",
+		Program:        "demo.exe",
+		RestartOnCrash: false,
+	}
 	rt := newTestRuntime(t, []task.Config{cfg})
 
 	if err := rt.SetRestartOnCrash(cfg.ID, true); err != nil {

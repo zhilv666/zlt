@@ -1,6 +1,6 @@
 package app
 
-import "tray/internal/api"
+import "zhulingtai/internal/api"
 
 type autoStartAPIAdapter struct{}
 

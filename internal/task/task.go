@@ -16,22 +16,3 @@ type Config struct {
 	HealthCheckIntervalSec      int      `json:"health_check_interval_sec"`
 	HealthCheckFailureThreshold int      `json:"health_check_failure_threshold"`
 }
-
-func DefaultOpenListTask() Config {
-	return Config{
-		ID:                          "openlist",
-		Name:                        "OpenList",
-		Program:                     "openlist.exe",
-		Args:                        []string{"server"},
-		WorkDir:                     ".",
-		Env:                         []string{},
-		AutoStart:                   false,
-		RestartOnCrash:              false,
-		StopTimeoutSec:              8,
-		RestartDelaySec:             2,
-		MaxRestartCount:             0,
-		HealthCheckURL:              "",
-		HealthCheckIntervalSec:      0,
-		HealthCheckFailureThreshold: 0,
-	}
-}

@@ -11,15 +11,15 @@ BUILD_TIME=$(date +"%Y-%m-%dT%H:%M:%S%z")
 
 DIST_DIR="dist"
 VERSION_DIR="$DIST_DIR/$VERSION"
-BASE_NAME="tray-$VERSION-$TARGET_OS-$TARGET_ARCH"
+BASE_NAME="zlt-$VERSION-$TARGET_OS-$TARGET_ARCH"
 WORK_DIR="$VERSION_DIR/.tmp-$BASE_NAME"
 LEGACY_DIR="$VERSION_DIR/$BASE_NAME"
-BIN_NAME="tray"
+BIN_NAME="zlt"
 ARTIFACT_PATH="$VERSION_DIR/$BASE_NAME"
 
 case "$TARGET_OS" in
   windows)
-    BIN_NAME="tray.exe"
+    BIN_NAME="zlt.exe"
     ARTIFACT_PATH="$VERSION_DIR/$BASE_NAME.exe"
     ;;
   *)
@@ -46,7 +46,7 @@ case "$TARGET_OS" in
     mv "$WORK_DIR/$BIN_NAME" "$ARTIFACT_PATH"
     ;;
   *)
-    tar -czf "$ARTIFACT_PATH" -C "$WORK_DIR" .
+    go run ./scripts/release_pack.go "$WORK_DIR" "$ARTIFACT_PATH"
     ;;
 esac
 

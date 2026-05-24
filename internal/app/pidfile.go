@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,9 +13,15 @@ import (
 type pidLock struct {
 	Path string
 	PID  int
+	Addr string
 }
 
-func acquirePIDFile(path string) (*pidLock, error) {
+type pidFilePayload struct {
+	PID  int    `json:"pid"`
+	Addr string `json:"addr,omitempty"`
+}
+
+func acquirePIDFile(path string, addr string) (*pidLock, error) {
 	if path == "" {
 		return nil, nil
 	}
@@ -29,10 +36,25 @@ func acquirePIDFile(path string) (*pidLock, error) {
 	}
 
 	pid := os.Getpid()
-	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)), 0o644); err != nil {
+	payload := pidFilePayload{
+		PID:  pid,
+		Addr: strings.TrimSpace(addr),
+	}
+	return writePIDFile(path, payload)
+}
+
+func writePIDFile(path string, payload pidFilePayload) (*pidLock, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	return &pidLock{Path: path, PID: pid}, nil
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return nil, err
+	}
+	return &pidLock{Path: path, PID: payload.PID, Addr: payload.Addr}, nil
 }
 
 func readPIDFile(path string) (*pidLock, error) {
@@ -44,6 +66,18 @@ func readPIDFile(path string) (*pidLock, error) {
 	if text == "" {
 		return nil, os.ErrNotExist
 	}
+
+	var payload pidFilePayload
+	if strings.HasPrefix(text, "{") {
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return nil, fmt.Errorf("invalid pid file: %s", path)
+		}
+		if payload.PID <= 0 {
+			return nil, fmt.Errorf("invalid pid file: %s", path)
+		}
+		return &pidLock{Path: path, PID: payload.PID, Addr: strings.TrimSpace(payload.Addr)}, nil
+	}
+
 	pid, err := strconv.Atoi(text)
 	if err != nil || pid <= 0 {
 		return nil, fmt.Errorf("invalid pid file: %s", path)

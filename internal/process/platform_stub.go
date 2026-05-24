@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 
-	"tray/internal/task"
+	"zhulingtai/internal/task"
 )
 
 func prepareCommand(cmd *exec.Cmd) {}

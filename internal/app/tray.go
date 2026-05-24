@@ -4,22 +4,22 @@ package app
 
 import (
 	"context"
+	"log"
 	"os/exec"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/getlantern/systray"
-	rootassets "tray"
-	"tray/internal/buildinfo"
-	"tray/internal/process"
-	"tray/internal/task"
+	rootassets "zhulingtai"
+	"zhulingtai/internal/buildinfo"
+	"zhulingtai/internal/process"
+	"zhulingtai/internal/task"
 )
 
 type trayTaskItem struct {
 	taskID      string
 	controlItem *systray.MenuItem
-	restartItem *systray.MenuItem
 }
 
 type trayController struct {
@@ -57,7 +57,14 @@ func (c *trayController) onReady() {
 	systray.AddSeparator()
 	c.initVersionMenu()
 	systray.AddSeparator()
-	quitItem := systray.AddMenuItem("退出", "Quit the tray app")
+	quitItem := systray.AddMenuItem("退出", "Quit the app")
+
+	go func() {
+		if err := c.rt.StartAutoStartTasks(); err != nil {
+			log.Printf("zlt autostart failed: %v", err)
+		}
+		c.syncTaskMenus()
+	}()
 
 	go func() {
 		ticker := time.NewTicker(1500 * time.Millisecond)
@@ -70,6 +77,11 @@ func (c *trayController) onReady() {
 			case <-ticker.C:
 				c.syncTaskMenus()
 			case <-quitItem.ClickedCh:
+				quitItem.Disable()
+				quitItem.SetTitle("退出中...")
+				log.Printf("zlt quit: stopping tasks before exit")
+				_ = c.rt.Shutdown(context.Background())
+				log.Printf("zlt quit: shutdown complete, quitting systray")
 				systray.Quit()
 				return
 			}
@@ -89,26 +101,21 @@ func (c *trayController) syncTaskMenus() {
 		entry, ok := c.taskItems[cfg.ID]
 		if !ok {
 			controlItem := c.taskRoot.AddSubMenuItem("", "")
-			restartItem := c.taskRoot.AddSubMenuItem("", "")
 			entry = &trayTaskItem{
 				taskID:      cfg.ID,
 				controlItem: controlItem,
-				restartItem: restartItem,
 			}
 			c.taskItems[cfg.ID] = entry
 
 			go c.listenTaskControl(entry)
-			go c.listenTaskRestart(entry)
 		}
 		c.refreshTaskItem(cfg, entry)
 		entry.controlItem.Show()
-		entry.restartItem.Show()
 	}
 
 	for id, entry := range c.taskItems {
 		if _, ok := seen[id]; !ok {
 			entry.controlItem.Hide()
-			entry.restartItem.Hide()
 		}
 	}
 }
@@ -132,24 +139,6 @@ func (c *trayController) listenTaskControl(entry *trayTaskItem) {
 	}()
 }
 
-func (c *trayController) listenTaskRestart(entry *trayTaskItem) {
-	go func() {
-		for range entry.restartItem.ClickedCh {
-			cfg, ok := c.lookupTask(entry.taskID)
-			if !ok {
-				continue
-			}
-			_ = c.rt.SetRestartOnCrash(entry.taskID, !cfg.RestartOnCrash)
-			c.mu.Lock()
-			cfg, ok = c.lookupTask(entry.taskID)
-			if ok {
-				c.refreshTaskItem(cfg, entry)
-			}
-			c.mu.Unlock()
-		}
-	}()
-}
-
 func (c *trayController) refreshTaskItem(cfg task.Config, entry *trayTaskItem) {
 	state, ok := c.rt.Manager.State(cfg.ID)
 	if !ok || !isTaskRunning(state.Status) {
@@ -165,17 +154,6 @@ func (c *trayController) refreshTaskItem(cfg task.Config, entry *trayTaskItem) {
 		entry.controlItem.SetTooltip("Stop " + cfg.Name)
 		entry.controlItem.Enable()
 	}
-
-	if cfg.RestartOnCrash {
-		entry.restartItem.SetTitle("✓ 崩溃自动重启 " + cfg.Name)
-		entry.restartItem.SetTooltip("Disable restart on crash for " + cfg.Name)
-		entry.restartItem.Check()
-	} else {
-		entry.restartItem.SetTitle("○ 崩溃自动重启 " + cfg.Name)
-		entry.restartItem.SetTooltip("Enable restart on crash for " + cfg.Name)
-		entry.restartItem.Uncheck()
-	}
-	entry.restartItem.Enable()
 }
 
 func (c *trayController) lookupTask(taskID string) (task.Config, bool) {
@@ -194,7 +172,7 @@ func isTaskRunning(status string) bool {
 
 func (c *trayController) initVersionMenu() {
 	info := buildinfo.Current()
-	_ = systray.AddMenuItem("Version: "+info.Version, "Version")
+	_ = systray.AddMenuItem("Version: "+buildinfo.DisplayVersion(info.Version), "Version")
 }
 
 func openBrowser(url string) {

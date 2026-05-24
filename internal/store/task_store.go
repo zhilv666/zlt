@@ -10,7 +10,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"tray/internal/task"
+	"zhulingtai/internal/task"
 )
 
 type TaskStore struct {
@@ -109,11 +109,6 @@ func (s *TaskStore) Load() ([]task.Config, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-
-	if len(tasks) == 0 {
-		return []task.Config{task.DefaultOpenListTask()}, nil
-	}
-
 	return tasks, nil
 }
 
@@ -240,7 +235,7 @@ func (s *TaskStore) loadLegacyJSON() ([]task.Config, error) {
 	data, err := os.ReadFile(s.jsonPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return []task.Config{task.DefaultOpenListTask()}, nil
+			return []task.Config{}, nil
 		}
 		return nil, err
 	}
@@ -248,9 +243,6 @@ func (s *TaskStore) loadLegacyJSON() ([]task.Config, error) {
 	var tasks []task.Config
 	if err := json.Unmarshal(data, &tasks); err != nil {
 		return nil, err
-	}
-	if len(tasks) == 0 {
-		tasks = []task.Config{task.DefaultOpenListTask()}
 	}
 	return tasks, nil
 }

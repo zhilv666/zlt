@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -11,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"tray/internal/process"
-	"tray/internal/store"
-	"tray/internal/task"
+	"zhulingtai/internal/process"
+	"zhulingtai/internal/store"
+	"zhulingtai/internal/task"
 )
 
 type Runtime struct {
@@ -22,6 +23,11 @@ type Runtime struct {
 	Tasks     []task.Config
 	Manager   *process.Manager
 	HTTP      *http.Server
+
+	autoStartOnce sync.Once
+	autoStartErr  error
+	shutdownOnce  sync.Once
+	shutdownErr   error
 }
 
 func NewRuntime() (*Runtime, error) {
@@ -48,10 +54,6 @@ func NewRuntime() (*Runtime, error) {
 		Manager:   manager,
 	}
 
-	if err := runtime.applyAutoStart(); err != nil {
-		return nil, err
-	}
-
 	return runtime, nil
 }
 
@@ -63,10 +65,33 @@ func (r *Runtime) StartHTTP() error {
 }
 
 func (r *Runtime) Shutdown(ctx context.Context) error {
-	if r.TaskStore != nil {
-		_ = r.TaskStore.Close()
-	}
-	return r.HTTP.Shutdown(ctx)
+	r.shutdownOnce.Do(func() {
+		if err := r.StopAllTasks(); err != nil {
+			r.shutdownErr = err
+		}
+		if r.HTTP != nil {
+			shutdownCtx := ctx
+			cancel := func() {}
+			if _, ok := ctx.Deadline(); !ok {
+				shutdownCtx, cancel = context.WithTimeout(ctx, 3*time.Second)
+			}
+			defer cancel()
+
+			if err := r.HTTP.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("runtime shutdown: http shutdown err=%v, forcing close", err)
+				if closeErr := r.HTTP.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) && r.shutdownErr == nil {
+					r.shutdownErr = closeErr
+				}
+				if r.shutdownErr == nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+					r.shutdownErr = err
+				}
+			}
+		}
+		if r.TaskStore != nil {
+			_ = r.TaskStore.Close()
+		}
+	})
+	return r.shutdownErr
 }
 
 func (r *Runtime) Address() string {
@@ -169,9 +194,6 @@ func (r *Runtime) ReplaceTasks(tasks []task.Config) error {
 		seen[cfg.ID] = struct{}{}
 		normalized = append(normalized, cfg)
 	}
-	if len(normalized) == 0 {
-		normalized = []task.Config{task.DefaultOpenListTask()}
-	}
 
 	for _, st := range r.Manager.States() {
 		if st.Status == process.StatusRunning || st.Status == process.StatusStarting || st.Status == process.StatusStopping {
@@ -267,11 +289,35 @@ func (r *Runtime) applyAutoStart() error {
 		if !cfg.AutoStart {
 			continue
 		}
+		log.Printf("autostart task: starting %s", cfg.ID)
 		if err := r.Manager.Start(cfg.ID); err != nil {
+			log.Printf("autostart task: failed %s err=%v", cfg.ID, err)
 			return fmt.Errorf("auto-start %s failed: %w", cfg.ID, err)
 		}
+		log.Printf("autostart task: started %s", cfg.ID)
 	}
 	return nil
+}
+
+func (r *Runtime) StartAutoStartTasks() error {
+	r.autoStartOnce.Do(func() {
+		r.autoStartErr = r.applyAutoStart()
+	})
+	return r.autoStartErr
+}
+
+func (r *Runtime) StopAllTasks() error {
+	var firstErr error
+	for _, cfg := range r.ListTasks() {
+		log.Printf("shutdown task: stopping %s", cfg.ID)
+		if err := r.Manager.Stop(cfg.ID); err != nil && firstErr == nil {
+			log.Printf("shutdown task: failed %s err=%v", cfg.ID, err)
+			firstErr = err
+			continue
+		}
+		log.Printf("shutdown task: stopped %s", cfg.ID)
+	}
+	return firstErr
 }
 
 func (r *Runtime) RestartTask(taskID string) error {

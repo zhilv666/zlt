@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"tray/internal/process"
-	"tray/internal/task"
+	"zhulingtai/internal/process"
+	"zhulingtai/internal/task"
 )
 
 func TestReadLogTailReturnsMissingAsEmpty(t *testing.T) {
@@ -38,6 +38,39 @@ func TestReadLogTailReturnsLastNLines(t *testing.T) {
 	trimmed := strings.TrimSpace(content)
 	if trimmed != "4" {
 		t.Fatalf("unexpected log tail %q", content)
+	}
+}
+
+func TestReadTaskLogFallsBackToLegacyStdoutStderr(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "data", "logs", "demo"), 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir temp: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(wd)
+	}()
+
+	if err := os.WriteFile(filepath.Join("data", "logs", "demo", "stdout.log"), []byte("out-1\nout-2\n"), 0o644); err != nil {
+		t.Fatalf("write stdout log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("data", "logs", "demo", "stderr.log"), []byte("err-1\n"), 0o644); err != nil {
+		t.Fatalf("write stderr log: %v", err)
+	}
+
+	content, err := readTaskLog("demo")
+	if err != nil {
+		t.Fatalf("read task log: %v", err)
+	}
+	if !strings.Contains(content, "out-1") || !strings.Contains(content, "err-1") {
+		t.Fatalf("unexpected merged log content %q", content)
 	}
 }
 
@@ -69,25 +102,6 @@ type testAutoStart struct {
 func (a testAutoStart) Status() (AutoStartStatus, error) { return a.status, nil }
 func (testAutoStart) Enable() error                      { return nil }
 func (testAutoStart) Disable() error                     { return nil }
-
-func TestHandleTaskActionRejectsInvalidLogType(t *testing.T) {
-	server := NewServer(testRuntime{}, testManager{}, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/demo/logs?type=bad", nil)
-	rec := httptest.NewRecorder()
-
-	server.handleTaskAction(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rec.Code)
-	}
-	var resp response
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Msg != "invalid log type" {
-		t.Fatalf("unexpected message %q", resp.Msg)
-	}
-}
 
 func TestWriteTaskActionErrorUsesNotFoundForMissingTask(t *testing.T) {
 	rec := httptest.NewRecorder()

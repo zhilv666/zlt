@@ -9,27 +9,27 @@ tasks:
   build:
     desc: Build Windows release artifact to bin/
     cmds:
-      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/tray-windows-amd64 windows amd64"
+      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/zlt-windows-amd64 windows amd64"
 
   build:current:
     desc: Build current host binary to bin/
     cmds:
-      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/tray-current"
+      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/zlt-current"
 
   build:windows:
     desc: Build Windows GUI binary to bin/
     cmds:
-      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/tray-windows-amd64 windows amd64"
+      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/zlt-windows-amd64 windows amd64"
 
   build:linux:
     desc: Build Linux binary to bin/
     cmds:
-      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/tray-linux-amd64 linux amd64"
+      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/zlt-linux-amd64 linux amd64"
 
   build:darwin:
     desc: Build macOS binary to bin/
     cmds:
-      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/tray-darwin-amd64 darwin amd64"
+      - sh -c "mkdir -p ./bin && ./scripts/build.sh ./bin/zlt-darwin-amd64 darwin amd64"
 
   release:
     desc: Create current host release directory in dist/

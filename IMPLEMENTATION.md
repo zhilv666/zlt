@@ -13,21 +13,16 @@
 - [x] Implement log file redirection
 - [x] Implement HTTP API server
 - [x] Implement static web entry
-- [x] Implement tray integration
+- [x] Implement system tray integration
 - [x] Build and verify locally
 
 ## Current Scope
 
-Target task:
-
-- `openlist.exe server`
-
 Target capabilities:
 
-- Start from tray
-- Stop from tray
-- View status from browser
-- View logs from browser
+- Start and stop commands from the system tray
+- Manage tasks from browser
+- View task and system logs from browser
 - Persist task config locally
 
 ## Next Round
@@ -65,10 +60,17 @@ Target capabilities:
 - [x] Add `start` subcommand for daemon/background launch
 - [x] Add `stop` subcommand for command-managed task shutdown
 - [x] Add `restart` subcommand for command-managed task restart
-- [x] Keep web UI available without tray on Linux servers
+- [x] Keep web UI available without the system tray on Linux servers
 
 ### 3. Startup automation
 
 - [x] Add OS startup/auto-launch support
 - [x] Document startup behavior by platform
 - [x] Expose auto-launch controls in the web UI
+
+### 4. Log experience
+
+- [x] Merge task stdout/stderr into a single task log
+- [x] Support ANSI log rendering in the browser
+- [x] Expose system log `data/app.log` in the browser
+- [x] Keep log streaming and download support

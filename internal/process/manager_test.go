@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"tray/internal/task"
+	"zhulingtai/internal/task"
 )
 
 func TestPerformHealthCheckAcceptsHealthyResponse(t *testing.T) {

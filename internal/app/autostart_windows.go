@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 const windowsRunKey = `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
@@ -23,6 +24,7 @@ func enableAutostart() error {
 
 	command := fmt.Sprintf("%q run", exe)
 	cmd := exec.Command("reg", "add", windowsRunKey, "/v", windowsAutostartValue, "/t", "REG_SZ", "/d", command, "/f")
+	prepareWindowsBackgroundCommand(cmd)
 	output, err := cmd.CombinedOutput()
 	log.Printf("autostart windows enable: command=%q output=%s err=%v", strings.Join(cmd.Args, " "), strings.TrimSpace(string(output)), err)
 	if err != nil {
@@ -37,6 +39,7 @@ func enableAutostart() error {
 
 func disableAutostart() error {
 	cmd := exec.Command("reg", "delete", windowsRunKey, "/v", windowsAutostartValue, "/f")
+	prepareWindowsBackgroundCommand(cmd)
 	output, err := cmd.CombinedOutput()
 	log.Printf("autostart windows disable: command=%q output=%s err=%v", strings.Join(cmd.Args, " "), strings.TrimSpace(string(output)), err)
 	if err != nil {
@@ -65,6 +68,7 @@ func statusAutostart() error {
 
 func getAutoStartStatus() (AutoStartStatus, error) {
 	cmd := exec.Command("reg", "query", windowsRunKey, "/v", windowsAutostartValue)
+	prepareWindowsBackgroundCommand(cmd)
 	output, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(output))
 	log.Printf("autostart windows query: command=%q output=%s err=%v", strings.Join(cmd.Args, " "), text, err)
@@ -89,4 +93,11 @@ func getAutoStartStatus() (AutoStartStatus, error) {
 		Status:    "enabled",
 		UnitPath:  filepath.Join("HKCU", "Software", "Microsoft", "Windows", "CurrentVersion", "Run"),
 	}, nil
+}
+
+func prepareWindowsBackgroundCommand(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: createNoWindow,
+		HideWindow:    true,
+	}
 }

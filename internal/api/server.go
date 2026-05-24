@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	rootassets "tray"
-	"tray/internal/buildinfo"
-	"tray/internal/process"
-	"tray/internal/task"
+	rootassets "zhulingtai"
+	"zhulingtai/internal/buildinfo"
+	"zhulingtai/internal/process"
+	"zhulingtai/internal/task"
 )
 
 type Runtime interface {
@@ -78,6 +78,10 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/build-info", s.handleBuildInfo)
+	mux.HandleFunc("/api/system-log", s.handleSystemLog)
+	mux.HandleFunc("/api/system-log-stream", s.handleSystemLogStream)
+	mux.HandleFunc("/api/system-log-download", s.handleSystemLogDownload)
+	mux.HandleFunc("/api/system-log-clear", s.handleSystemLogClear)
 	mux.HandleFunc("/api/autostart", s.handleAutoStart)
 	mux.HandleFunc("/api/autostart/", s.handleAutoStart)
 	mux.HandleFunc("/api/events/tasks", s.handleTaskEvents)
@@ -109,6 +113,60 @@ func (s *Server) handleBuildInfo(w http.ResponseWriter, r *http.Request) {
 		Msg:  "ok",
 		Data: buildinfo.Current(),
 	})
+}
+
+func (s *Server) handleSystemLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+		return
+	}
+
+	tail, _ := strconv.Atoi(r.URL.Query().Get("tail"))
+	if tail <= 0 {
+		tail = 200
+	}
+	if tail > 2000 {
+		tail = 2000
+	}
+
+	data, err := readLogTail(systemLogPath(), tail)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, response{Code: 0, Msg: "ok", Data: map[string]string{"content": data}})
+}
+
+func (s *Server) handleSystemLogDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+		return
+	}
+
+	data, err := os.ReadFile(systemLogPath())
+	if err != nil && !os.IsNotExist(err) {
+		writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="app.log"`)
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleSystemLogClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+		return
+	}
+	if err := os.WriteFile(systemLogPath(), []byte{}, 0o644); err != nil {
+		writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, response{Code: 0, Msg: "logs cleared"})
+}
+
+func (s *Server) handleSystemLogStream(w http.ResponseWriter, r *http.Request) {
+	s.handleGenericLogStream(w, r, systemLogPath(), "system")
 }
 
 func (s *Server) handleAutoStart(w http.ResponseWriter, r *http.Request) {
@@ -340,14 +398,6 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
 			return
 		}
-		logType := r.URL.Query().Get("type")
-		if logType == "" {
-			logType = "stdout"
-		}
-		if logType != "stdout" && logType != "stderr" {
-			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: "invalid log type"})
-			return
-		}
 		tail, _ := strconv.Atoi(r.URL.Query().Get("tail"))
 		if tail <= 0 {
 			tail = 200
@@ -356,7 +406,7 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 			tail = 2000
 		}
 
-		data, err := readLogTail(filepath.Join("data", "logs", taskID, logType+".log"), tail)
+		data, err := readTaskLogTail(taskID, tail)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
 			return
@@ -367,29 +417,20 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
 			return
 		}
-		s.handleLogStream(w, r, taskID)
+		s.handleTaskLogStream(w, r, taskID)
 	case "download-logs":
 		if r.Method != http.MethodGet {
 			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
 			return
 		}
-		logType := r.URL.Query().Get("type")
-		if logType == "" {
-			logType = "stdout"
-		}
-		if logType != "stdout" && logType != "stderr" {
-			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: "invalid log type"})
-			return
-		}
-		logPath := filepath.Join("data", "logs", taskID, logType+".log")
-		data, err := os.ReadFile(logPath)
-		if err != nil && !os.IsNotExist(err) {
+		data, err := readTaskLog(taskID)
+		if err != nil {
 			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Disposition", `attachment; filename="`+taskID+"-"+logType+`.log"`)
-		_, _ = w.Write(data)
+		w.Header().Set("Content-Disposition", `attachment; filename="`+taskID+`.log"`)
+		_, _ = w.Write([]byte(data))
 	case "clear-logs":
 		if r.Method != http.MethodPost {
 			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
@@ -405,19 +446,14 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request, taskID string) {
+func (s *Server) handleTaskLogStream(w http.ResponseWriter, r *http.Request, taskID string) {
+	s.handleGenericLogStream(w, r, "", taskID)
+}
+
+func (s *Server) handleGenericLogStream(w http.ResponseWriter, r *http.Request, path string, sourceID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	logType := r.URL.Query().Get("type")
-	if logType == "" {
-		logType = "stdout"
-	}
-	if logType != "stdout" && logType != "stderr" {
-		writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: "invalid log type"})
 		return
 	}
 
@@ -437,17 +473,23 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request, taskID 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	logPath := filepath.Join("data", "logs", taskID, logType+".log")
 	var lastPayload []byte
 	for {
-		content, err := readLogTail(logPath, tail)
+		var (
+			content string
+			err     error
+		)
+		if path != "" {
+			content, err = readLogTail(path, tail)
+		} else {
+			content, err = readTaskLogTail(sourceID, tail)
+		}
 		if err != nil {
 			return
 		}
 
 		payload, err := json.Marshal(map[string]string{
-			"task_id": taskID,
-			"type":    logType,
+			"task_id": sourceID,
 			"content": content,
 		})
 		if err != nil {
@@ -498,6 +540,71 @@ func readLogTail(path string, tail int) (string, error) {
 	}
 
 	lines := strings.Split(string(data), "\n")
+	if len(lines) > tail {
+		lines = lines[len(lines)-tail:]
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+func taskLogPath(taskID string) string {
+	return filepath.Join("data", "logs", taskID, "app.log")
+}
+
+func systemLogPath() string {
+	return filepath.Join("data", "app.log")
+}
+
+func taskLegacyStdoutPath(taskID string) string {
+	return filepath.Join("data", "logs", taskID, "stdout.log")
+}
+
+func taskLegacyStderrPath(taskID string) string {
+	return filepath.Join("data", "logs", taskID, "stderr.log")
+}
+
+func readTaskLog(taskID string) (string, error) {
+	combinedPath := taskLogPath(taskID)
+	combinedData, err := os.ReadFile(combinedPath)
+	if err == nil {
+		return string(combinedData), nil
+	}
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	stdoutData, stdoutErr := os.ReadFile(taskLegacyStdoutPath(taskID))
+	if stdoutErr != nil && !os.IsNotExist(stdoutErr) {
+		return "", stdoutErr
+	}
+
+	stderrData, stderrErr := os.ReadFile(taskLegacyStderrPath(taskID))
+	if stderrErr != nil && !os.IsNotExist(stderrErr) {
+		return "", stderrErr
+	}
+
+	var builder strings.Builder
+	if len(stdoutData) > 0 {
+		builder.Write(stdoutData)
+	}
+	if len(stderrData) > 0 {
+		if builder.Len() > 0 && !strings.HasSuffix(builder.String(), "\n") {
+			builder.WriteByte('\n')
+		}
+		builder.Write(stderrData)
+	}
+	return builder.String(), nil
+}
+
+func readTaskLogTail(taskID string, tail int) (string, error) {
+	content, err := readTaskLog(taskID)
+	if err != nil {
+		return "", err
+	}
+	if content == "" {
+		return "", nil
+	}
+
+	lines := strings.Split(content, "\n")
 	if len(lines) > tail {
 		lines = lines[len(lines)-tail:]
 	}

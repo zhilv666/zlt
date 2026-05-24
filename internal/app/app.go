@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"tray/internal/api"
-	"tray/internal/buildinfo"
+	"zhulingtai/internal/api"
+	"zhulingtai/internal/buildinfo"
 )
 
 const defaultHTTPAddr = "127.0.0.1:3719"
@@ -24,7 +24,7 @@ func RunWithOptions(opts RunOptions) error {
 
 	var lock *pidLock
 	if opts.PIDFile != "" {
-		lock, err = acquirePIDFile(opts.PIDFile)
+		lock, err = acquirePIDFile(opts.PIDFile, opts.Addr)
 		if err != nil {
 			return err
 		}
@@ -37,9 +37,12 @@ func RunWithOptions(opts RunOptions) error {
 		return err
 	}
 
-	log.Printf("tray starting: %s", buildinfo.Summary())
+	log.Printf("zlt starting: %s", buildinfo.Summary())
 
 	if opts.Headless {
+		if err := runtime.StartAutoStartTasks(); err != nil {
+			return err
+		}
 		return runHeadless(runtime)
 	}
 	return runTray(runtime)

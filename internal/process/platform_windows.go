@@ -11,7 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	"tray/internal/task"
+	"zhulingtai/internal/task"
 )
 
 const createNoWindow = 0x08000000
@@ -60,9 +60,13 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 		}
 	}
 
-	script := "$exe = [System.IO.Path]::GetFullPath('" + escapePowerShellSingleQuoted(resolvedProgram) + "'); " +
-		"$proc = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ([System.StringComparer]::OrdinalIgnoreCase.Equals($_.ExecutablePath, $exe)) } | Select-Object -First 1 -ExpandProperty ProcessId; " +
-		"if ($proc) { Write-Output $proc }"
+	script := "$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
+		"Get-CimInstance Win32_Process | ForEach-Object { " +
+		"$pid = $_.ProcessId; " +
+		"$exe = if ($_.ExecutablePath) { $_.ExecutablePath } else { '' }; " +
+		"$cmd = if ($_.CommandLine) { $_.CommandLine } else { '' }; " +
+		"Write-Output ($pid.ToString() + \"`t\" + ($exe -replace \"`t\", \" \") + \"`t\" + ($cmd -replace \"`t\", \" \")) " +
+		"}"
 
 	checkCmd := exec.Command("powershell.exe", "-NoProfile", "-Command", script)
 	preparePlatformCommand(checkCmd)
@@ -71,16 +75,35 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 		return 0, false
 	}
 
-	text := strings.TrimSpace(string(out))
-	if text == "" {
-		return 0, false
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
+			continue
+		}
+
+		pid, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+		if err != nil || pid <= 0 {
+			continue
+		}
+
+		executablePath := strings.TrimSpace(parts[1])
+		commandLine := strings.TrimSpace(parts[2])
+
+		if executablePath != "" && !sameExecutable(executablePath, resolvedProgram) {
+			continue
+		}
+		if !commandMatchesTask(commandLine, resolvedProgram, cfg.Args) {
+			continue
+		}
+		return pid, true
 	}
 
-	pid, err := strconv.Atoi(text)
-	if err != nil || pid <= 0 {
-		return 0, false
-	}
-	return pid, true
+	return 0, false
 }
 
 func escapePowerShellSingleQuoted(value string) string {

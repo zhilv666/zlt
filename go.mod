@@ -1,4 +1,4 @@
-module tray
+module zhulingtai
 
 go 1.25.0
 

@@ -428,6 +428,43 @@
       margin: 0;
       box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
     }
+
+    .ansi-bold { font-weight: 700; }
+    .ansi-dim { opacity: 0.72; }
+    .ansi-italic { font-style: italic; }
+    .ansi-underline { text-decoration: underline; }
+    .ansi-fg-30 { color: #111827; }
+    .ansi-fg-31 { color: #f87171; }
+    .ansi-fg-32 { color: #4ade80; }
+    .ansi-fg-33 { color: #fbbf24; }
+    .ansi-fg-34 { color: #60a5fa; }
+    .ansi-fg-35 { color: #f472b6; }
+    .ansi-fg-36 { color: #22d3ee; }
+    .ansi-fg-37 { color: #e5e7eb; }
+    .ansi-fg-90 { color: #9ca3af; }
+    .ansi-fg-91 { color: #fca5a5; }
+    .ansi-fg-92 { color: #86efac; }
+    .ansi-fg-93 { color: #fcd34d; }
+    .ansi-fg-94 { color: #93c5fd; }
+    .ansi-fg-95 { color: #f9a8d4; }
+    .ansi-fg-96 { color: #67e8f9; }
+    .ansi-fg-97 { color: #f9fafb; }
+    .ansi-bg-40 { background: #111827; }
+    .ansi-bg-41 { background: #7f1d1d; }
+    .ansi-bg-42 { background: #14532d; }
+    .ansi-bg-43 { background: #78350f; }
+    .ansi-bg-44 { background: #1e3a8a; }
+    .ansi-bg-45 { background: #831843; }
+    .ansi-bg-46 { background: #155e75; }
+    .ansi-bg-47 { background: #d1d5db; color: #111827; }
+    .ansi-bg-100 { background: #4b5563; }
+    .ansi-bg-101 { background: #991b1b; }
+    .ansi-bg-102 { background: #166534; }
+    .ansi-bg-103 { background: #92400e; }
+    .ansi-bg-104 { background: #1d4ed8; }
+    .ansi-bg-105 { background: #9d174d; }
+    .ansi-bg-106 { background: #0e7490; }
+    .ansi-bg-107 { background: #f3f4f6; color: #111827; }
     
     .error-text {
       color: var(--danger);
@@ -690,9 +727,12 @@
               <select id="log-task" class="form-control form-select" style="width: auto; min-width: 200px;"></select>
             </div>
             <div class="toolbar-item">
-              <select id="log-type" class="form-control form-select" style="width: auto;">
-                <option value="stdout">stdout</option>
-                <option value="stderr">stderr</option>
+              <span class="system-meta">任务日志</span>
+            </div>
+            <div class="toolbar-item">
+              <select id="log-render-mode" class="form-control form-select" style="width: auto;">
+                <option value="ansi">彩色渲染</option>
+                <option value="plain">纯文本</option>
               </select>
             </div>
             <div class="toolbar-item">
@@ -760,15 +800,15 @@
         </div>
         <div class="form-group">
           <label class="form-label" for="task-timeout">停止超时 (秒)</label>
-          <input id="task-timeout" class="form-control" type="number" min="1" value="8">
+          <input id="task-timeout" class="form-control" type="number" min="1" placeholder="留空则默认 8">
         </div>
         <div class="form-group">
           <label class="form-label" for="task-restart-delay">重启延迟 (秒)</label>
-          <input id="task-restart-delay" class="form-control" type="number" min="0" value="2">
+          <input id="task-restart-delay" class="form-control" type="number" min="0" placeholder="留空则默认 2">
         </div>
         <div class="form-group">
           <label class="form-label" for="task-max-restart-count">最大自动重启次数</label>
-          <input id="task-max-restart-count" class="form-control" type="number" min="0" value="0">
+          <input id="task-max-restart-count" class="form-control" type="number" min="0" placeholder="留空则默认 0">
         </div>
         <div class="form-group">
           <label class="form-label" for="task-health-url">健康检查 URL</label>
@@ -776,11 +816,11 @@
         </div>
         <div class="form-group">
           <label class="form-label" for="task-health-interval">健康检查间隔 (秒)</label>
-          <input id="task-health-interval" class="form-control" type="number" min="1" value="10">
+          <input id="task-health-interval" class="form-control" type="number" min="1" placeholder="启用健康检查时默认 10">
         </div>
         <div class="form-group">
           <label class="form-label" for="task-health-threshold">连续失败阈值</label>
-          <input id="task-health-threshold" class="form-control" type="number" min="1" value="3">
+          <input id="task-health-threshold" class="form-control" type="number" min="1" placeholder="启用健康检查时默认 3">
         </div>
         
         <div class="form-check">
@@ -800,6 +840,7 @@
   </div>
 
   <script>
+    const SYSTEM_LOG_ID = '__system__';
     let currentTasks = [];
     let editingTaskId = '';
     let actionInFlight = new Set();
@@ -811,6 +852,7 @@
     let currentLogStreamKey = '';
     let currentTaskSearch = '';
     let currentAutoStartStatus = null;
+    let currentLogRenderMode = localStorage.getItem('log-render-mode') || 'ansi';
 
     document.getElementById('current-year').textContent = new Date().getFullYear();
 
@@ -831,6 +873,138 @@
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+    }
+
+    function ansiStateToClassNames(state) {
+      const classes = [];
+      if (state.bold) classes.push('ansi-bold');
+      if (state.dim) classes.push('ansi-dim');
+      if (state.italic) classes.push('ansi-italic');
+      if (state.underline) classes.push('ansi-underline');
+      if (state.fg) classes.push('ansi-fg-' + state.fg);
+      if (state.bg) classes.push('ansi-bg-' + state.bg);
+      return classes;
+    }
+
+    function cloneAnsiState(state) {
+      return {
+        bold: !!state.bold,
+        dim: !!state.dim,
+        italic: !!state.italic,
+        underline: !!state.underline,
+        fg: state.fg || '',
+        bg: state.bg || ''
+      };
+    }
+
+    function applyAnsiCode(state, code) {
+      switch (code) {
+        case 0:
+          state.bold = false;
+          state.dim = false;
+          state.italic = false;
+          state.underline = false;
+          state.fg = '';
+          state.bg = '';
+          return;
+        case 1:
+          state.bold = true;
+          return;
+        case 2:
+          state.dim = true;
+          return;
+        case 3:
+          state.italic = true;
+          return;
+        case 4:
+          state.underline = true;
+          return;
+        case 22:
+          state.bold = false;
+          state.dim = false;
+          return;
+        case 23:
+          state.italic = false;
+          return;
+        case 24:
+          state.underline = false;
+          return;
+        case 39:
+          state.fg = '';
+          return;
+        case 49:
+          state.bg = '';
+          return;
+      }
+
+      if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+        state.fg = String(code);
+        return;
+      }
+      if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) {
+        state.bg = String(code);
+      }
+    }
+
+    function stripAnsiCodes(content) {
+      return String(content || '').replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
+    }
+
+    function renderAnsiHTML(content) {
+      const input = String(content || '');
+      if (!input) {
+        return '';
+      }
+
+      const ansiPattern = /\u001b\[([0-9;]*)m/g;
+      let result = '';
+      let lastIndex = 0;
+      let match;
+      const state = { bold: false, dim: false, italic: false, underline: false, fg: '', bg: '' };
+
+      while ((match = ansiPattern.exec(input)) !== null) {
+        if (match.index > lastIndex) {
+          result += wrapAnsiSegment(input.slice(lastIndex, match.index), cloneAnsiState(state));
+        }
+
+        const rawCodes = match[1] === '' ? ['0'] : match[1].split(';');
+        rawCodes.forEach((item) => {
+          const code = parseInt(item, 10);
+          if (!Number.isNaN(code)) {
+            applyAnsiCode(state, code);
+          }
+        });
+        lastIndex = ansiPattern.lastIndex;
+      }
+
+      if (lastIndex < input.length) {
+        result += wrapAnsiSegment(input.slice(lastIndex), cloneAnsiState(state));
+      }
+
+      return result;
+    }
+
+    function wrapAnsiSegment(text, state) {
+      if (!text) {
+        return '';
+      }
+
+      const escaped = escapeHTML(text);
+      const classes = ansiStateToClassNames(state);
+      if (classes.length === 0) {
+        return escaped;
+      }
+      return '<span class="' + classes.join(' ') + '">' + escaped + '</span>';
+    }
+
+    function setLogContent(content) {
+      const logsEl = document.getElementById('logs');
+      const text = String(content || '');
+      if (currentLogRenderMode === 'plain') {
+        logsEl.textContent = stripAnsiCodes(text);
+        return;
+      }
+      logsEl.innerHTML = renderAnsiHTML(text);
     }
 
     function isRunningStatus(status) {
@@ -871,14 +1045,22 @@
 
     function getFilteredLogTasks() {
       const keyword = String(document.getElementById('log-task-filter').value || '').trim().toLowerCase();
+      const systemItem = {
+        id: SYSTEM_LOG_ID,
+        name: '系统日志',
+        match: ['系统日志', 'app.log', '系统', 'app'].join(' ').toLowerCase()
+      };
+      const taskItems = currentTasks.map((item) => ({
+        id: item.task.id,
+        name: item.task.name,
+        task: item.task,
+        match: [item.task.name, item.task.id].join(' ').toLowerCase()
+      }));
+
       if (!keyword) {
-        return currentTasks;
+        return [systemItem].concat(taskItems);
       }
-      return currentTasks.filter((item) => {
-        const name = String(item.task.name || '').toLowerCase();
-        const id = String(item.task.id || '').toLowerCase();
-        return name.includes(keyword) || id.includes(keyword);
-      });
+      return [systemItem].concat(taskItems).filter((item) => item.match.includes(keyword));
     }
 
     function updateTaskPagination(totalItems) {
@@ -900,8 +1082,8 @@
       taskSelect.innerHTML = '';
       filteredTasks.forEach((item) => {
         const option = document.createElement('option');
-        option.value = item.task.id;
-        option.textContent = item.task.name + ' (' + item.task.id + ')';
+        option.value = item.id;
+        option.textContent = item.id === SYSTEM_LOG_ID ? '系统日志 (app.log)' : item.name + ' (' + item.id + ')';
         taskSelect.appendChild(option);
       });
 
@@ -911,10 +1093,10 @@
         return;
       }
 
-      if (currentLogTask && filteredTasks.some((x) => x.task.id === currentLogTask)) {
+      if (currentLogTask && filteredTasks.some((x) => x.id === currentLogTask)) {
         taskSelect.value = currentLogTask;
       } else {
-        taskSelect.value = filteredTasks[0].task.id;
+        taskSelect.value = filteredTasks[0].id;
       }
     }
 
@@ -1013,12 +1195,12 @@
       document.getElementById('task-program').value = '';
       document.getElementById('task-args').value = '';
       document.getElementById('task-workdir').value = '';
-      document.getElementById('task-timeout').value = 8;
-      document.getElementById('task-restart-delay').value = 2;
-      document.getElementById('task-max-restart-count').value = 0;
+      document.getElementById('task-timeout').value = '';
+      document.getElementById('task-restart-delay').value = '';
+      document.getElementById('task-max-restart-count').value = '';
       document.getElementById('task-health-url').value = '';
-      document.getElementById('task-health-interval').value = 10;
-      document.getElementById('task-health-threshold').value = 3;
+      document.getElementById('task-health-interval').value = '';
+      document.getElementById('task-health-threshold').value = '';
       document.getElementById('task-autostart').checked = false;
       document.getElementById('task-restart').checked = false;
       openModal();
@@ -1133,7 +1315,8 @@
 
       populateLogTaskOptions();
 
-      if (!currentTasks.some(x => x.task.id === document.getElementById('log-task').value)) {
+      const currentLogTarget = document.getElementById('log-task').value;
+      if (currentLogTarget !== SYSTEM_LOG_ID && !currentTasks.some(x => x.task.id === currentLogTarget)) {
         disconnectLogStream();
       } else if (document.getElementById('tab-logs').classList.contains('active') && document.getElementById('log-auto-refresh').checked) {
         connectLogStream();
@@ -1260,21 +1443,23 @@
       }
       
       const taskId = document.getElementById('log-task').value;
-      const type = document.getElementById('log-type').value;
       const follow = document.getElementById('log-follow').checked;
       const logsEl = document.getElementById('logs');
       if (!taskId) {
-        logsEl.textContent = '请选择一个任务查看日志...';
+        setLogContent('请选择一个任务查看日志...');
         return;
       }
       
       const nearBottom = logsEl.scrollTop + logsEl.clientHeight >= logsEl.scrollHeight - 40;
-      const data = await api('/api/tasks/' + taskId + '/logs?type=' + type + '&tail=400');
+      const url = taskId === SYSTEM_LOG_ID
+        ? '/api/system-log?tail=400'
+        : '/api/tasks/' + encodeURIComponent(taskId) + '/logs?tail=400';
+      const data = await api(url);
       
       if (data && data.code === 0) {
-        logsEl.textContent = (data.data && data.data.content) || '';
+        setLogContent((data.data && data.data.content) || '');
       } else {
-        logsEl.textContent = '无法读取日志: ' + (data.msg || '未知错误');
+        setLogContent('无法读取日志: ' + (data.msg || '未知错误'));
       }
       
       if (follow || nearBottom) {
@@ -1326,27 +1511,29 @@
       }
 
       const taskId = document.getElementById('log-task').value;
-      const type = document.getElementById('log-type').value;
       if (!taskId) {
         disconnectLogStream();
         return;
       }
 
-      const streamKey = taskId + ':' + type;
+      const streamKey = taskId;
       if (logsEventSource && currentLogStreamKey === streamKey) {
         return;
       }
 
       disconnectLogStream();
       currentLogStreamKey = streamKey;
-      logsEventSource = new EventSource('/api/tasks/' + encodeURIComponent(taskId) + '/logs-stream?type=' + encodeURIComponent(type) + '&tail=400');
+      const streamURL = taskId === SYSTEM_LOG_ID
+        ? '/api/system-log-stream?tail=400'
+        : '/api/tasks/' + encodeURIComponent(taskId) + '/logs-stream?tail=400';
+      logsEventSource = new EventSource(streamURL);
       logsEventSource.addEventListener('logs', (event) => {
         try {
           const payload = JSON.parse(event.data);
           const logsEl = document.getElementById('logs');
           const follow = document.getElementById('log-follow').checked;
           const nearBottom = logsEl.scrollTop + logsEl.clientHeight >= logsEl.scrollHeight - 40;
-          logsEl.textContent = payload.content || '';
+          setLogContent(payload.content || '');
           if (follow || nearBottom) {
             logsEl.scrollTop = logsEl.scrollHeight;
           }
@@ -1366,12 +1553,15 @@
       if (!taskId) return;
       if (!confirm('确认清空该任务的日志吗？')) return;
       
-      const result = await api('/api/tasks/' + taskId + '/clear-logs', { method: 'POST' });
+      const url = taskId === SYSTEM_LOG_ID
+        ? '/api/system-log-clear'
+        : '/api/tasks/' + encodeURIComponent(taskId) + '/clear-logs';
+      const result = await api(url, { method: 'POST' });
       if (result.code !== 0) {
         alert(result.msg || '清空日志失败');
         return;
       }
-      document.getElementById('logs').textContent = '';
+      setLogContent('');
       await loadLogs();
     }
 
@@ -1413,12 +1603,13 @@
 
     function downloadLogs() {
       const taskId = document.getElementById('log-task').value;
-      const type = document.getElementById('log-type').value;
       if (!taskId) {
         alert('请选择一个任务');
         return;
       }
-      window.location.href = '/api/tasks/' + taskId + '/download-logs?type=' + encodeURIComponent(type);
+      window.location.href = taskId === SYSTEM_LOG_ID
+        ? '/api/system-log-download'
+        : '/api/tasks/' + encodeURIComponent(taskId) + '/download-logs';
     }
 
     async function loadVersion() {
@@ -1431,6 +1622,7 @@
     }
 
     // Init
+    document.getElementById('log-render-mode').value = currentLogRenderMode;
     loadVersion();
     loadTasks();
     loadAutoStartStatus();
@@ -1464,9 +1656,10 @@
       loadLogs();
       connectLogStream();
     });
-    document.getElementById('log-type').addEventListener('change', () => {
+    document.getElementById('log-render-mode').addEventListener('change', (event) => {
+      currentLogRenderMode = event.target.value === 'plain' ? 'plain' : 'ansi';
+      localStorage.setItem('log-render-mode', currentLogRenderMode);
       loadLogs();
-      connectLogStream();
     });
     document.getElementById('log-auto-refresh').addEventListener('change', () => {
       if (document.getElementById('log-auto-refresh').checked) {

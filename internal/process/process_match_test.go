@@ -63,3 +63,85 @@ func TestCommandMatchesProgram(t *testing.T) {
 		})
 	}
 }
+
+func TestCommandMatchesTaskWithArgs(t *testing.T) {
+	cases := []struct {
+		name        string
+		commandLine string
+		programPath string
+		args        []string
+		want        bool
+	}{
+		{
+			name:        "matches python main script",
+			commandLine: `/usr/bin/python3 main.py`,
+			programPath: `/usr/bin/python3`,
+			args:        []string{"main.py"},
+			want:        true,
+		},
+		{
+			name:        "does not match different script",
+			commandLine: `/usr/bin/python3 other.py`,
+			programPath: `/usr/bin/python3`,
+			args:        []string{"main.py"},
+			want:        false,
+		},
+		{
+			name:        "does not match missing args",
+			commandLine: `/usr/bin/python3`,
+			programPath: `/usr/bin/python3`,
+			args:        []string{"main.py"},
+			want:        false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := commandMatchesTask(tc.commandLine, tc.programPath, tc.args); got != tc.want {
+				t.Fatalf("unexpected task match result: got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSameWorkingDir(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  string
+		right string
+		want  bool
+	}{
+		{
+			name:  "matches identical unix path",
+			left:  "/home/ubuntu/code/cksd",
+			right: "/home/ubuntu/code/cksd",
+			want:  true,
+		},
+		{
+			name:  "matches normalized windows separators",
+			left:  `C:\work\demo`,
+			right: `C:/work/demo`,
+			want:  true,
+		},
+		{
+			name:  "different working directory",
+			left:  "/home/ubuntu/code/cksd",
+			right: "/home/ubuntu/code/other",
+			want:  false,
+		},
+		{
+			name:  "empty path does not match",
+			left:  "",
+			right: "/home/ubuntu/code/cksd",
+			want:  false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sameWorkingDir(tc.left, tc.right); got != tc.want {
+				t.Fatalf("unexpected workdir match result: got %v want %v", got, tc.want)
+			}
+		})
+	}
+}

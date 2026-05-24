@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	"tray/internal/app"
+	"zhulingtai/internal/app"
 )
 
 func main() {

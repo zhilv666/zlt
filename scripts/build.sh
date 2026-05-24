@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-OUTPUT="${1:-tray.exe}"
+OUTPUT="${1:-zlt.exe}"
 TARGET_OS="${2:-$(go env GOOS)}"
 TARGET_ARCH="${3:-$(go env GOARCH)}"
 
@@ -14,19 +14,21 @@ export GOSUMDB="off"
 VERSION=$(git -c safe.directory="$REPO_DIR" describe --tags --always | tr -d '\r')
 COMMIT=$(git -c safe.directory="$REPO_DIR" rev-parse --short HEAD | tr -d '\r')
 BUILD_TIME=$(date +"%Y-%m-%dT%H:%M:%S%z")
+BUILD_PROFILE="release"
 HOST_OS="$(go env GOOS)"
 ICON_PATH="./ico.ico"
-RSRC_SYSO="./cmd/tray/rsrc_windows_${TARGET_ARCH}.syso"
+RSRC_SYSO="./cmd/zlt/rsrc_windows_${TARGET_ARCH}.syso"
 
 export GOOS="$TARGET_OS"
 export GOARCH="$TARGET_ARCH"
 
 LDFLAGS="-s -w \
--X tray/internal/buildinfo.Version=$VERSION \
--X tray/internal/buildinfo.Commit=$COMMIT \
--X tray/internal/buildinfo.BuildTime=$BUILD_TIME \
--X tray/internal/buildinfo.TargetOS=$TARGET_OS \
--X tray/internal/buildinfo.TargetArch=$TARGET_ARCH"
+-X zhulingtai/internal/buildinfo.Version=$VERSION \
+-X zhulingtai/internal/buildinfo.Commit=$COMMIT \
+-X zhulingtai/internal/buildinfo.BuildTime=$BUILD_TIME \
+-X zhulingtai/internal/buildinfo.BuildProfile=$BUILD_PROFILE \
+-X zhulingtai/internal/buildinfo.TargetOS=$TARGET_OS \
+-X zhulingtai/internal/buildinfo.TargetArch=$TARGET_ARCH"
 
 if [ "$TARGET_OS" = "windows" ]; then
   LDFLAGS="-H windowsgui $LDFLAGS"
@@ -44,6 +46,7 @@ esac
 printf 'version=%s\n' "$VERSION"
 printf 'commit=%s\n' "$COMMIT"
 printf 'build_time=%s\n' "$BUILD_TIME"
+printf 'build_profile=%s\n' "$BUILD_PROFILE"
 printf 'platform=%s/%s\n' "$TARGET_OS" "$TARGET_ARCH"
 
 cleanup() {
@@ -61,4 +64,4 @@ if [ "$TARGET_OS" = "windows" ] && [ -f "$ICON_PATH" ]; then
   fi
 fi
 
-go build -ldflags "$LDFLAGS" -o "$OUTPUT" ./cmd/tray
+go build -ldflags "$LDFLAGS" -o "$OUTPUT" ./cmd/zlt
