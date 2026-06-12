@@ -3,17 +3,21 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
-	"syscall"
+
+	"golang.org/x/sys/windows/registry"
 )
 
-const windowsRunKey = `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+const windowsRunKeyPath = `Software\Microsoft\Windows\CurrentVersion\Run`
 const windowsAutostartValue = "驻令台"
+
+func windowsRunKeyDisplay() string {
+	return filepath.Join("HKCU", "Software", "Microsoft", "Windows", "CurrentVersion", "Run")
+}
 
 func enableAutostart() error {
 	exe, err := os.Executable()
@@ -22,36 +26,51 @@ func enableAutostart() error {
 		return err
 	}
 
-	command := fmt.Sprintf("%q run", exe)
-	cmd := exec.Command("reg", "add", windowsRunKey, "/v", windowsAutostartValue, "/t", "REG_SZ", "/d", command, "/f")
-	prepareWindowsBackgroundCommand(cmd)
-	output, err := cmd.CombinedOutput()
-	log.Printf("autostart windows enable: command=%q output=%s err=%v", strings.Join(cmd.Args, " "), strings.TrimSpace(string(output)), err)
+	workdir, err := os.Getwd()
 	if err != nil {
-		msg := strings.TrimSpace(string(output))
-		if msg == "" {
-			return err
-		}
-		return fmt.Errorf("reg add autostart: %s", msg)
+		log.Printf("autostart windows enable: getwd failed: %v", err)
+		return err
 	}
+
+	// Wrap paths in real double quotes WITHOUT Go-style escaping: the Windows
+	// command-line parser does not unescape "\\", so %q's doubled backslashes
+	// would corrupt the path and the entry would fail to launch at login.
+	command := fmt.Sprintf(`"%s" --workdir "%s"`, exe, workdir)
+
+	key, err := registry.OpenKey(registry.CURRENT_USER, windowsRunKeyPath, registry.SET_VALUE)
+	if err != nil {
+		log.Printf("autostart windows enable: open key failed: %v", err)
+		return err
+	}
+	defer key.Close()
+
+	if err := key.SetStringValue(windowsAutostartValue, command); err != nil {
+		log.Printf("autostart windows enable: set value failed: %v", err)
+		return err
+	}
+	log.Printf("autostart windows enable: set %s=%q", windowsAutostartValue, command)
 	return nil
 }
 
 func disableAutostart() error {
-	cmd := exec.Command("reg", "delete", windowsRunKey, "/v", windowsAutostartValue, "/f")
-	prepareWindowsBackgroundCommand(cmd)
-	output, err := cmd.CombinedOutput()
-	log.Printf("autostart windows disable: command=%q output=%s err=%v", strings.Join(cmd.Args, " "), strings.TrimSpace(string(output)), err)
+	key, err := registry.OpenKey(registry.CURRENT_USER, windowsRunKeyPath, registry.SET_VALUE)
 	if err != nil {
-		msg := strings.TrimSpace(string(output))
-		if msg == "" {
-			return err
-		}
-		if strings.Contains(strings.ToLower(msg), "unable to find") {
+		if errors.Is(err, registry.ErrNotExist) {
 			return nil
 		}
-		return fmt.Errorf("reg delete autostart: %s", msg)
+		log.Printf("autostart windows disable: open key failed: %v", err)
+		return err
 	}
+	defer key.Close()
+
+	if err := key.DeleteValue(windowsAutostartValue); err != nil {
+		if errors.Is(err, registry.ErrNotExist) {
+			return nil
+		}
+		log.Printf("autostart windows disable: delete value failed: %v", err)
+		return err
+	}
+	log.Printf("autostart windows disable: deleted %s", windowsAutostartValue)
 	return nil
 }
 
@@ -67,37 +86,25 @@ func statusAutostart() error {
 }
 
 func getAutoStartStatus() (AutoStartStatus, error) {
-	cmd := exec.Command("reg", "query", windowsRunKey, "/v", windowsAutostartValue)
-	prepareWindowsBackgroundCommand(cmd)
-	output, err := cmd.CombinedOutput()
-	text := strings.TrimSpace(string(output))
-	log.Printf("autostart windows query: command=%q output=%s err=%v", strings.Join(cmd.Args, " "), text, err)
+	unitPath := windowsRunKeyDisplay()
+
+	key, err := registry.OpenKey(registry.CURRENT_USER, windowsRunKeyPath, registry.QUERY_VALUE)
 	if err != nil {
-		if strings.Contains(strings.ToLower(text), "unable to find") {
-			return AutoStartStatus{
-				Supported: true,
-				Enabled:   false,
-				Status:    "disabled",
-				UnitPath:  filepath.Join("HKCU", "Software", "Microsoft", "Windows", "CurrentVersion", "Run"),
-			}, nil
+		if errors.Is(err, registry.ErrNotExist) {
+			return AutoStartStatus{Supported: true, Enabled: false, Status: "disabled", UnitPath: unitPath}, nil
 		}
-		if text == "" {
-			return AutoStartStatus{}, err
+		log.Printf("autostart windows status: open key failed: %v", err)
+		return AutoStartStatus{}, err
+	}
+	defer key.Close()
+
+	if _, _, err := key.GetStringValue(windowsAutostartValue); err != nil {
+		if errors.Is(err, registry.ErrNotExist) {
+			return AutoStartStatus{Supported: true, Enabled: false, Status: "disabled", UnitPath: unitPath}, nil
 		}
-		return AutoStartStatus{}, fmt.Errorf("reg query autostart: %s", text)
+		log.Printf("autostart windows status: get value failed: %v", err)
+		return AutoStartStatus{}, err
 	}
 
-	return AutoStartStatus{
-		Supported: true,
-		Enabled:   true,
-		Status:    "enabled",
-		UnitPath:  filepath.Join("HKCU", "Software", "Microsoft", "Windows", "CurrentVersion", "Run"),
-	}, nil
-}
-
-func prepareWindowsBackgroundCommand(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: createNoWindow,
-		HideWindow:    true,
-	}
+	return AutoStartStatus{Supported: true, Enabled: true, Status: "enabled", UnitPath: unitPath}, nil
 }

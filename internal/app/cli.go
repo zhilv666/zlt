@@ -17,6 +17,11 @@ type RunOptions struct {
 }
 
 func Execute(args []string) error {
+	args, err := applyWorkdirFlag(args)
+	if err != nil {
+		return err
+	}
+
 	if len(args) == 0 {
 		return Run()
 	}
@@ -52,6 +57,27 @@ func Execute(args []string) error {
 		}
 		return fmt.Errorf("unknown command: %s\n\n%s", args[0], helpText())
 	}
+}
+
+// applyWorkdirFlag strips a global "--workdir <path>" flag from args (used by
+// autostart so the process starts in the directory recorded at enable time) and
+// changes into it before any data files are touched.
+func applyWorkdirFlag(args []string) ([]string, error) {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--workdir" || args[i] == "--work-dir" {
+			if i+1 >= len(args) {
+				return nil, errors.New("missing value for --workdir")
+			}
+			if err := os.Chdir(args[i+1]); err != nil {
+				return nil, fmt.Errorf("chdir to workdir %q: %w", args[i+1], err)
+			}
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out, nil
 }
 
 func runCommand(args []string) error {
@@ -190,7 +216,7 @@ func helpText() string {
 
 用法:
   zlt
-  zlt run [--addr <host:port>]
+  zlt run [--addr <host:port>] [--workdir <path>]
   zlt start [--addr <host:port>] [--pid-file <path>]
   zlt stop [--pid-file <path>]
   zlt restart [--addr <host:port>] [--pid-file <path>]
