@@ -1,0 +1,45 @@
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+      - duplicate
+      - invalid
+      - question
+      - wontfix
+  categories:
+    - title: Features
+      labels:
+        - feat
+        - feature
+        - enhancement
+    - title: Fixes
+      labels:
+        - fix
+        - bug
+        - bugfix
+        - hotfix
+    - title: Documentation
+      labels:
+        - docs
+        - documentation
+    - title: Maintenance
+      labels:
+        - chore
+        - ci
+        - build
+        - dependencies
+        - refactor
+        - test
+    - title: Other
+      labels:
+        - "*"
+
+change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  ## Full Changelog
+
+  https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...$NEXT_TAG
