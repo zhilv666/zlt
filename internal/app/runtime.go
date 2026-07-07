@@ -269,6 +269,18 @@ func validateTask(cfg task.Config) error {
 	if cfg.HealthCheckFailureThreshold < 0 {
 		return errors.New("health check failure threshold must be >= 0")
 	}
+	for _, entry := range cfg.Env {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			return fmt.Errorf("environment variable must be in KEY=VALUE form: %q", entry)
+		}
+		if key == "" {
+			return fmt.Errorf("environment variable key must not be empty: %q", entry)
+		}
+		if strings.ContainsRune(entry, 0) {
+			return fmt.Errorf("environment variable must not contain NUL: %q", entry)
+		}
+	}
 	if cfg.HealthCheckURL != "" {
 		parsed, err := url.ParseRequestURI(cfg.HealthCheckURL)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {

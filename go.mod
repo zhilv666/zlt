@@ -2,7 +2,10 @@ module zhulingtai
 
 go 1.25.0
 
-require github.com/getlantern/systray v1.2.2
+require (
+	github.com/getlantern/systray v1.2.2
+	golang.org/x/text v0.39.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

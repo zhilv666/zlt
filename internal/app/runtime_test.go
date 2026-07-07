@@ -103,6 +103,8 @@ func TestValidateTask(t *testing.T) {
 		{name: "invalid health url", cfg: task.Config{ID: "i", Name: "n", Program: "p", HealthCheckURL: "tcp://demo", HealthCheckIntervalSec: 10, HealthCheckFailureThreshold: 3}, want: "health check URL must be a valid http/https URL"},
 		{name: "missing health interval when enabled", cfg: task.Config{ID: "i", Name: "n", Program: "p", HealthCheckURL: "http://127.0.0.1/health", HealthCheckFailureThreshold: 3}, want: "health check interval must be > 0 when health check is enabled"},
 		{name: "missing health threshold when enabled", cfg: task.Config{ID: "i", Name: "n", Program: "p", HealthCheckURL: "http://127.0.0.1/health", HealthCheckIntervalSec: 10}, want: "health check failure threshold must be > 0 when health check is enabled"},
+		{name: "env missing equals", cfg: task.Config{ID: "i", Name: "n", Program: "p", Env: []string{"PORT"}}, want: `environment variable must be in KEY=VALUE form: "PORT"`},
+		{name: "env empty key", cfg: task.Config{ID: "i", Name: "n", Program: "p", Env: []string{"=value"}}, want: `environment variable key must not be empty: "=value"`},
 	}
 
 	for _, tc := range cases {
@@ -126,6 +128,9 @@ func TestValidateTask(t *testing.T) {
 		HealthCheckFailureThreshold: 4,
 	}); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if err := validateTask(task.Config{ID: "demo", Name: "Demo", Program: "demo.exe", Env: []string{"PORT=8080", "EMPTY="}}); err != nil {
+		t.Fatalf("unexpected validation error for valid env: %v", err)
 	}
 }
 

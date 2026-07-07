@@ -150,7 +150,7 @@ func (s *Server) handleSystemLogDownload(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="app.log"`)
-	_, _ = w.Write(data)
+	_, _ = w.Write([]byte(decodeLogText(data)))
 }
 
 func (s *Server) handleSystemLogClear(w http.ResponseWriter, r *http.Request) {
@@ -539,7 +539,7 @@ func readLogTail(path string, tail int) (string, error) {
 		return "", err
 	}
 
-	lines := strings.Split(string(data), "\n")
+	lines := strings.Split(decodeLogText(data), "\n")
 	if len(lines) > tail {
 		lines = lines[len(lines)-tail:]
 	}
@@ -566,7 +566,7 @@ func readTaskLog(taskID string) (string, error) {
 	combinedPath := taskLogPath(taskID)
 	combinedData, err := os.ReadFile(combinedPath)
 	if err == nil {
-		return string(combinedData), nil
+		return decodeLogText(combinedData), nil
 	}
 	if !os.IsNotExist(err) {
 		return "", err
@@ -592,7 +592,7 @@ func readTaskLog(taskID string) (string, error) {
 		}
 		builder.Write(stderrData)
 	}
-	return builder.String(), nil
+	return decodeLogText([]byte(builder.String())), nil
 }
 
 func readTaskLogTail(taskID string, tail int) (string, error) {
