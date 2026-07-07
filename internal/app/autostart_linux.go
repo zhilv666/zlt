@@ -14,6 +14,11 @@ import (
 const systemdServiceName = "zhulingtai.service"
 
 func enableAutostart() error {
+	// Detect if running under sudo - systemctl --user won't work
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		return fmt.Errorf("please run without sudo: systemctl --user requires your user session\nTry: ./zlt autostart enable --user")
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		log.Printf("autostart linux enable: resolve executable failed: %v", err)
@@ -70,6 +75,11 @@ WantedBy=default.target
 }
 
 func disableAutostart() error {
+	// Detect if running under sudo - systemctl --user won't work
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		return fmt.Errorf("please run without sudo: systemctl --user requires your user session\nTry: ./zlt autostart disable --user")
+	}
+
 	unitPath, err := systemdUnitPath()
 	if err != nil {
 		log.Printf("autostart linux disable: unit path failed: %v", err)
@@ -90,6 +100,11 @@ func disableAutostart() error {
 }
 
 func statusAutostart() error {
+	// Detect if running under sudo - systemctl --user won't work
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		return fmt.Errorf("please run without sudo: systemctl --user requires your user session\nTry: ./zlt autostart status --user")
+	}
+
 	status, err := getAutoStartStatus()
 	if err != nil {
 		log.Printf("autostart linux status: err=%v", err)
