@@ -75,6 +75,81 @@ jobs:
           cd release-assets
           sha256sum * > SHA256SUMS.txt
 
+      - name: Generate release notes from git log
+        shell: bash
+        run: |
+          # 找到上一个 tag（按提交历史，取当前 tag 之前最近的一个）
+          PREV_TAG="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+
+          if [ -n "${PREV_TAG}" ]; then
+            RANGE="${PREV_TAG}..${GITHUB_REF_NAME}"
+          else
+            # 没有上一个 tag（首个 release）时，列出全部历史
+            RANGE="${GITHUB_REF_NAME}"
+          fi
+
+          # 取区间内的提交，格式：短哈希<TAB>标题，排除 merge 提交
+          git log --no-merges --pretty=format:'%h%x09%s' "${RANGE}" > commits.txt
+
+          # 剩余未归类的提交，逐类剔除后剩下的进入 Other
+          cp commits.txt remaining.txt
+
+          # 按类型输出一个分组：$1=标题 $2=类型匹配正则
+          # 提交标题形如 "🐛 fix(scope): xxx"，类型前可能有 emoji+空格，
+          # 因此用 [[:space:]] 匹配 TAB 或 emoji 后的空格，类型后须紧跟 ( : 或 !
+          emit_category() {
+            local title="$1" pattern="$2" re matched
+            re="[[:space:]](${pattern})[(:!]"
+            matched="$(grep -E "${re}" remaining.txt || true)"
+            if [ -n "${matched}" ]; then
+              echo "### ${title}"
+              echo ""
+              printf '%s\n' "${matched}" | while IFS="$(printf '\t')" read -r hash subject; do
+                echo "- ${subject} (${hash})"
+              done
+              echo ""
+              # 从剩余集合中剔除已归类的行
+              grep -vE "${re}" remaining.txt > remaining.tmp || true
+              mv remaining.tmp remaining.txt
+            fi
+          }
+
+          # 生成分组正文（不含版本标题，供 release body 与 CHANGELOG 复用）
+          {
+            emit_category "Features"      "feat|feature"
+            emit_category "Fixes"         "fix|bugfix|hotfix"
+            emit_category "Documentation" "docs"
+            emit_category "Maintenance"   "chore|ci|build|refactor|test|perf|style|deps"
+
+            # Other：以上都没匹配到的提交
+            if [ -s remaining.txt ]; then
+              echo "### Other"
+              echo ""
+              while IFS="$(printf '\t')" read -r hash subject; do
+                [ -n "${hash}" ] && echo "- ${subject} (${hash})"
+              done < remaining.txt
+              echo ""
+            fi
+          } > notes-body.md
+
+          # Full Changelog 链接
+          if [ -n "${PREV_TAG}" ]; then
+            COMPARE="https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${GITHUB_REF_NAME}"
+          else
+            COMPARE="https://github.com/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}"
+          fi
+
+          # GitHub Release 正文（标题已是 tag，正文不重复版本号）
+          {
+            echo "## What's Changed"
+            echo ""
+            cat notes-body.md
+            echo "**Full Changelog**: ${COMPARE}"
+          } > release-notes.md
+
+          echo "----- release notes -----"
+          cat release-notes.md
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -82,6 +157,54 @@ jobs:
         shell: bash
         run: |
           if ! gh release view "${GITHUB_REF_NAME}" --repo "${GH_REPO}" >/dev/null 2>&1; then
-            gh release create "${GITHUB_REF_NAME}" --repo "${GH_REPO}" --title "${GITHUB_REF_NAME}" --generate-notes
+            gh release create "${GITHUB_REF_NAME}" --repo "${GH_REPO}" --title "${GITHUB_REF_NAME}" --notes-file release-notes.md
+          else
+            gh release edit "${GITHUB_REF_NAME}" --repo "${GH_REPO}" --notes-file release-notes.md
           fi
           gh release upload "${GITHUB_REF_NAME}" release-assets/* --repo "${GH_REPO}" --clobber
+
+      - name: Update CHANGELOG.md
+        env:
+          # 默认分支名，仓库元数据里直接可取
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          # notes-body.md 是上一步生成的未跟踪文件，切分支不会影响它
+          BRANCH="${DEFAULT_BRANCH:-main}"
+
+          # 先切到默认分支的最新状态，再在其 CHANGELOG 之上叠加新片段
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "${BRANCH}"
+          git checkout -B "${BRANCH}" "origin/${BRANCH}"
+
+          DATE="$(date +%Y-%m-%d)"
+
+          # 本次版本片段：## 版本 (日期) + 分组正文
+          {
+            echo "## ${GITHUB_REF_NAME} (${DATE})"
+            echo ""
+            cat notes-body.md
+          } > entry.md
+
+          # 新片段插到顶部，保留历史（去掉旧文件的一级标题和紧随的空行）
+          {
+            echo "# Changelog"
+            echo ""
+            cat entry.md
+            if [ -f CHANGELOG.md ]; then
+              sed '1{/^# Changelog$/d;}' CHANGELOG.md | sed '1{/^$/d;}'
+            fi
+          } > CHANGELOG.new
+          mv CHANGELOG.new CHANGELOG.md
+
+          echo "----- CHANGELOG.md -----"
+          cat CHANGELOG.md
+
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md 无变化，跳过提交"
+            exit 0
+          fi
+          git add CHANGELOG.md
+          git commit -m "📝 docs(changelog): 更新 ${GITHUB_REF_NAME} 变更日志 [skip ci]"
+          git push origin "HEAD:${BRANCH}"
