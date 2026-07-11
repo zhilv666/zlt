@@ -448,6 +448,58 @@
     .status-stopped, .status-exited { color: var(--text-muted); background: var(--surface-3); border-color: var(--border); }
     .status-failed { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
 
+    /* Schedule badges reuse the same palette tokens: run results have no
+       pulsing dot, action chips describe what the plan does. */
+    .run-success { color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
+    .run-skipped { color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 30%, transparent); }
+    .run-failed { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+    .run-success::before, .run-skipped::before, .run-failed::before { animation: none; }
+
+    .act-start { color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
+    .act-stop { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+    .act-restart { color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 30%, transparent); }
+    .act-start::before, .act-stop::before, .act-restart::before { animation: none; }
+
+    /* ===== Schedule list ===== */
+    .schedule-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1.8fr) minmax(0, 0.9fr) minmax(0, 1.4fr) auto;
+      gap: 1.25rem;
+      align-items: center;
+      padding: 1.15rem 1.35rem;
+      border-bottom: 1px solid var(--border);
+      transition: background-color 0.18s;
+    }
+    .schedule-item:last-child { border-bottom: none; }
+    .schedule-item:hover { background-color: var(--surface-2); }
+    .schedule-item.schedule-disabled > div:first-child,
+    .schedule-item.schedule-disabled .cron-chip { opacity: 0.55; }
+
+    .cron-chip {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--text-main);
+      background: var(--surface-3);
+      border: 1px solid var(--border);
+      padding: 0.15rem 0.5rem;
+      border-radius: 6px;
+    }
+
+    .cron-presets { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.55rem; }
+    .cron-preset {
+      font-family: inherit;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      background: var(--surface-2);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--pill);
+      padding: 0.22rem 0.65rem;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .cron-preset:hover { color: var(--brand); border-color: var(--brand); background: var(--brand-soft); }
+
     @keyframes dotPulse {
       0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
       70% { box-shadow: 0 0 0 5px transparent; }
@@ -1021,6 +1073,7 @@
       .container { padding-top: 1.5rem; }
       .topbar { align-items: flex-start; }
       .task-item { grid-template-columns: 1fr; gap: 0.75rem; }
+      .schedule-item { grid-template-columns: 1fr; gap: 0.75rem; }
       .task-desc, .task-meta { white-space: normal; }
       .actions-group { justify-content: flex-start; margin-top: 0.35rem; }
       .footer-inner { grid-template-columns: 1fr; gap: 0.75rem; }
@@ -1111,6 +1164,10 @@
           <button class="nav-link" onclick="switchTab('logs')" id="tab-btn-logs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             <span>日志查看</span>
+          </button>
+          <button class="nav-link" onclick="switchTab('schedules')" id="tab-btn-schedules">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+            <span>计划任务</span>
           </button>
         </div>
 
@@ -1237,6 +1294,28 @@
         </div>
       </div>
     </div>
+
+    <!-- Tab 3: Schedules -->
+    <div class="tab-content" id="tab-schedules">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">计划任务</div>
+          <div class="task-actions">
+            <button class="btn btn-sm" onclick="loadSchedules()">
+              <svg style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+              刷新
+            </button>
+            <button class="btn btn-sm btn-primary" onclick="openNewScheduleModal()">
+              <svg style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              添加计划
+            </button>
+          </div>
+        </div>
+        <div class="card-body card-body-no-pad" id="schedule-list">
+          <div class="empty-state">加载中...</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <footer class="site-footer">
@@ -1342,6 +1421,78 @@
     </div>
   </div>
 
+  <!-- Schedule Edit Modal -->
+  <div id="schedule-modal" class="modal-backdrop" onclick="handleScheduleBackdropClick(event)">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="schedule-modal-title">新增计划</h3>
+        <button class="modal-close" onclick="closeScheduleModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-section">
+          <div class="form-section-title">基础信息</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label" for="schedule-id">计划 ID</label>
+              <input id="schedule-id" class="form-control" placeholder="留空自动生成">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="schedule-name">计划名称</label>
+              <input id="schedule-name" class="form-control" placeholder="例如: 工作日早晨启动">
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label" for="schedule-task">目标任务</label>
+              <select id="schedule-task" class="form-control form-select"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="schedule-action">执行动作</label>
+              <select id="schedule-action" class="form-control form-select">
+                <option value="start">启动任务</option>
+                <option value="stop">停止任务</option>
+                <option value="restart">重启任务</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">触发规则</div>
+          <div class="form-group">
+            <label class="form-label" for="schedule-cron">Cron 表达式（分 时 日 月 周）</label>
+            <input id="schedule-cron" class="form-control" placeholder="例如: 0 8 * * 1-5">
+            <div class="cron-presets">
+              <button type="button" class="cron-preset" data-cron="*/5 * * * *">每 5 分钟</button>
+              <button type="button" class="cron-preset" data-cron="0 * * * *">每小时</button>
+              <button type="button" class="cron-preset" data-cron="0 8 * * *">每天 08:00</button>
+              <button type="button" class="cron-preset" data-cron="0 8 * * 1-5">工作日 08:00</button>
+              <button type="button" class="cron-preset" data-cron="0 23 * * *">每天 23:00</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="schedule-timezone">时区</label>
+            <select id="schedule-timezone" class="form-control form-select">
+              <option value="">跟随系统</option>
+              <option value="Asia/Shanghai">Asia/Shanghai</option>
+              <option value="UTC">UTC</option>
+            </select>
+          </div>
+          <div class="option-row">
+            <label class="option" for="schedule-enabled">
+              <input id="schedule-enabled" type="checkbox" class="form-check-input" checked>
+              <span>启用该计划</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeScheduleModal()">取消</button>
+        <button class="btn btn-primary" id="btn-schedule-save" onclick="saveSchedule()">保存计划</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const SYSTEM_LOG_ID = '__system__';
     let currentTasks = [];
@@ -1356,6 +1507,10 @@
     let currentTaskSearch = '';
     let currentAutoStartStatus = null;
     let currentLogRenderMode = localStorage.getItem('log-render-mode') || 'ansi';
+    let currentSchedules = [];
+    let editingScheduleId = '';
+    let schedulesTimer = null;
+    let scheduleActionInFlight = new Set();
 
     document.getElementById('current-year').textContent = new Date().getFullYear();
 
@@ -1676,6 +1831,13 @@
         connectLogStream();
       } else {
         disconnectLogStream();
+      }
+
+      if (tabId === 'schedules') {
+        loadSchedules();
+        startScheduleTimer();
+      } else {
+        stopScheduleTimer();
       }
     }
 
@@ -2139,6 +2301,261 @@
       }
     }
 
+    // ===== Schedules =====
+    const SCHEDULE_ACTION_LABELS = { start: '启动', stop: '停止', restart: '重启' };
+    const SCHEDULE_RUN_LABELS = { success: '成功', skipped: '跳过', failed: '失败' };
+
+    function startScheduleTimer() {
+      if (schedulesTimer) return;
+      schedulesTimer = setInterval(loadSchedules, 30000);
+    }
+
+    function stopScheduleTimer() {
+      if (schedulesTimer) {
+        clearInterval(schedulesTimer);
+        schedulesTimer = null;
+      }
+    }
+
+    function formatScheduleTime(value) {
+      if (!value) return '—';
+      const d = new Date(value);
+      if (isNaN(d.getTime())) return value;
+      const p = (n) => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+
+    async function loadSchedules() {
+      const data = await api('/api/schedules');
+      if (data && data.code === 0) {
+        renderSchedules(data.data || []);
+      }
+    }
+
+    function renderSchedules(items) {
+      currentSchedules = items;
+      const root = document.getElementById('schedule-list');
+
+      if (items.length === 0) {
+        root.innerHTML = '<div class="empty-state">暂无计划，点击右上方“添加计划”为任务配置定时启动、停止或重启。</div>';
+        return;
+      }
+
+      root.innerHTML = '';
+      items.forEach((item) => {
+        const sch = item.schedule;
+        const busy = scheduleActionInFlight.has(sch.id);
+        const actionLabel = SCHEDULE_ACTION_LABELS[sch.action] || sch.action;
+        const taskLabel = item.task_exists
+          ? escapeHTML(item.task_name) + ' <span style="color:var(--text-faint);">(' + escapeHTML(sch.task_id) + ')</span>'
+          : '<span style="color:var(--danger);">任务不存在 (' + escapeHTML(sch.task_id) + ')</span>';
+
+        const lastRun = sch.last_status
+          ? '<div class="badge run-' + escapeHTML(sch.last_status) + '">' + (SCHEDULE_RUN_LABELS[sch.last_status] || escapeHTML(sch.last_status)) + '</div>' +
+            '<div class="task-meta" style="margin-top:4px;">' + formatScheduleTime(sch.last_run_at) + '</div>' +
+            (sch.last_detail ? '<span class="' + (sch.last_status === 'failed' ? 'error-text' : 'task-meta') + '" style="margin-top:4px;display:block;white-space:normal;" title="' + escapeHTML(sch.last_detail) + '">' + escapeHTML(sch.last_detail) + '</span>' : '')
+          : '<div class="task-meta">尚未执行</div>';
+
+        const row = document.createElement('div');
+        row.className = 'schedule-item' + (sch.enabled ? '' : ' schedule-disabled');
+        row.innerHTML =
+          '<div>' +
+            '<div class="task-name">' + escapeHTML(sch.name) + ' <span style="color:var(--text-muted);font-weight:normal;font-size:0.85rem;">(' + escapeHTML(sch.id) + ')</span></div>' +
+            '<div style="margin-bottom:0.3rem;"><span class="cron-chip">' + escapeHTML(sch.cron_expr) + '</span>' +
+              (sch.timezone ? ' <span class="task-meta" style="display:inline;">' + escapeHTML(sch.timezone) + '</span>' : '') +
+            '</div>' +
+            '<div class="task-meta">目标任务: ' + taskLabel + '</div>' +
+          '</div>' +
+          '<div>' +
+            '<div class="badge act-' + escapeHTML(sch.action) + '">' + escapeHTML(actionLabel) + '</div>' +
+            '<div class="task-meta" style="margin-top:6px;">' + (sch.enabled ? '已启用' : '已停用') + '</div>' +
+          '</div>' +
+          '<div>' +
+            '<div class="task-meta">下次执行: <strong>' + (sch.enabled ? formatScheduleTime(item.next_run_at) : '—') + '</strong></div>' +
+            '<div class="task-meta" style="margin-top:6px;">最近执行:</div>' +
+            lastRun +
+          '</div>' +
+          '<div class="actions-group">' +
+            '<button class="btn btn-sm btn-primary" data-id="' + escapeHTML(sch.id) + '" data-action="run"' + (busy ? ' disabled' : '') + '>' + (busy ? '执行中...' : '立即执行') + '</button>' +
+            '<button class="btn btn-sm" data-id="' + escapeHTML(sch.id) + '" data-action="toggle"' + (busy ? ' disabled' : '') + '>' + (sch.enabled ? '停用' : '启用') + '</button>' +
+            '<button class="btn btn-sm" data-id="' + escapeHTML(sch.id) + '" data-action="edit">编辑</button>' +
+            '<button class="btn btn-sm btn-danger" data-id="' + escapeHTML(sch.id) + '" data-action="delete">删除</button>' +
+          '</div>';
+        root.appendChild(row);
+      });
+
+      root.querySelectorAll('button[data-action]').forEach((btn) => {
+        btn.addEventListener('click', () => handleScheduleAction(btn.dataset.id, btn.dataset.action));
+      });
+    }
+
+    async function handleScheduleAction(id, action) {
+      const item = currentSchedules.find((x) => x.schedule.id === id);
+      if (!item) return;
+      const sch = item.schedule;
+
+      if (action === 'edit') {
+        openEditScheduleModal(sch);
+        return;
+      }
+
+      if (action === 'delete') {
+        if (!confirm('确认删除计划 "' + sch.name + '" 吗？')) return;
+        const result = await api('/api/schedules/' + encodeURIComponent(id), { method: 'DELETE' });
+        if (result.code !== 0) {
+          alert(result.msg || '删除失败');
+          return;
+        }
+        await loadSchedules();
+        return;
+      }
+
+      if (action === 'toggle') {
+        const url = '/api/schedules/' + encodeURIComponent(id) + (sch.enabled ? '/disable' : '/enable');
+        const result = await api(url, { method: 'POST' });
+        if (result.code !== 0) {
+          alert(result.msg || '操作失败');
+        }
+        await loadSchedules();
+        return;
+      }
+
+      if (action === 'run') {
+        scheduleActionInFlight.add(id);
+        renderSchedules(currentSchedules);
+        try {
+          const result = await api('/api/schedules/' + encodeURIComponent(id) + '/run', { method: 'POST' });
+          if (result.code !== 0) {
+            alert(result.msg || '执行失败');
+          } else {
+            const run = result.data || {};
+            const label = SCHEDULE_RUN_LABELS[run.status] || run.status || '未知';
+            alert('立即执行完成: ' + label + (run.detail ? '\n' + run.detail : ''));
+          }
+        } finally {
+          scheduleActionInFlight.delete(id);
+          await loadSchedules();
+        }
+      }
+    }
+
+    function populateScheduleTaskOptions(selectedTaskId) {
+      const select = document.getElementById('schedule-task');
+      select.innerHTML = '';
+      if (currentTasks.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '暂无任务，请先添加任务';
+        select.appendChild(option);
+        return;
+      }
+      currentTasks.forEach((item) => {
+        const option = document.createElement('option');
+        option.value = item.task.id;
+        option.textContent = item.task.name + ' (' + item.task.id + ')';
+        select.appendChild(option);
+      });
+      if (selectedTaskId && currentTasks.some((x) => x.task.id === selectedTaskId)) {
+        select.value = selectedTaskId;
+      }
+    }
+
+    function openScheduleModal() {
+      const modal = document.getElementById('schedule-modal');
+      modal.style.display = 'flex';
+      modal.offsetHeight;
+      modal.classList.add('show');
+    }
+
+    function closeScheduleModal() {
+      const modal = document.getElementById('schedule-modal');
+      modal.classList.remove('show');
+      setTimeout(() => {
+        modal.style.display = 'none';
+      }, 200);
+    }
+
+    function handleScheduleBackdropClick(e) {
+      if (e.target.id === 'schedule-modal') {
+        closeScheduleModal();
+      }
+    }
+
+    function openNewScheduleModal() {
+      editingScheduleId = '';
+      document.getElementById('schedule-modal-title').textContent = '新增计划';
+      document.getElementById('schedule-id').disabled = false;
+      document.getElementById('schedule-id').value = '';
+      document.getElementById('schedule-name').value = '';
+      document.getElementById('schedule-action').value = 'start';
+      document.getElementById('schedule-cron').value = '';
+      document.getElementById('schedule-timezone').value = '';
+      document.getElementById('schedule-enabled').checked = true;
+      populateScheduleTaskOptions('');
+      openScheduleModal();
+    }
+
+    function openEditScheduleModal(sch) {
+      editingScheduleId = sch.id;
+      document.getElementById('schedule-modal-title').textContent = '编辑计划: ' + sch.name;
+      document.getElementById('schedule-id').value = sch.id;
+      document.getElementById('schedule-id').disabled = true;
+      document.getElementById('schedule-name').value = sch.name || '';
+      document.getElementById('schedule-action').value = sch.action || 'start';
+      document.getElementById('schedule-cron').value = sch.cron_expr || '';
+      document.getElementById('schedule-timezone').value = sch.timezone || '';
+      document.getElementById('schedule-enabled').checked = !!sch.enabled;
+      populateScheduleTaskOptions(sch.task_id);
+      openScheduleModal();
+    }
+
+    async function saveSchedule() {
+      const payload = {
+        id: document.getElementById('schedule-id').value.trim(),
+        task_id: document.getElementById('schedule-task').value,
+        name: document.getElementById('schedule-name').value.trim(),
+        cron_expr: document.getElementById('schedule-cron').value.trim(),
+        timezone: document.getElementById('schedule-timezone').value,
+        action: document.getElementById('schedule-action').value,
+        enabled: document.getElementById('schedule-enabled').checked
+      };
+
+      if (!payload.task_id) {
+        alert('请选择目标任务');
+        return;
+      }
+      if (!payload.cron_expr) {
+        alert('请输入 Cron 表达式');
+        return;
+      }
+
+      const isEdit = !!editingScheduleId;
+      const url = isEdit ? '/api/schedules/' + encodeURIComponent(editingScheduleId) : '/api/schedules';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const btn = document.getElementById('btn-schedule-save');
+      const originalText = btn.innerHTML;
+      btn.innerHTML = '保存中...';
+      btn.disabled = true;
+
+      const result = await api(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+
+      if (result.code !== 0) {
+        alert(result.msg || '保存失败');
+        return;
+      }
+
+      closeScheduleModal();
+      await loadSchedules();
+    }
+
     // Init
     document.getElementById('log-render-mode').value = currentLogRenderMode;
     loadVersion();
@@ -2204,6 +2621,11 @@
     });
     document.getElementById('autostart-disable').addEventListener('click', () => {
       updateAutoStart('disable');
+    });
+    document.querySelectorAll('.cron-preset').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.getElementById('schedule-cron').value = btn.dataset.cron;
+      });
     });
   </script>
 
