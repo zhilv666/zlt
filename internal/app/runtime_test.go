@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"zhulingtai/internal/process"
+	"zhulingtai/internal/scheduler"
 	"zhulingtai/internal/store"
 	"zhulingtai/internal/task"
 )
@@ -40,11 +41,13 @@ func newTestRuntime(t *testing.T, tasks []task.Config) *Runtime {
 		t.Fatalf("seed task store: %v", err)
 	}
 
-	return &Runtime{
+	rt := &Runtime{
 		TaskStore: taskStore,
 		Tasks:     tasks,
 		Manager:   process.NewManager(tasks),
 	}
+	rt.Sched = scheduler.New(rt, rt.recordScheduleResult)
+	return rt
 }
 
 func TestNormalizeTask(t *testing.T) {

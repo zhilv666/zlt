@@ -37,6 +37,10 @@ func RunWithOptions(opts RunOptions) error {
 		return err
 	}
 
+	if err := runtime.StartScheduler(); err != nil {
+		log.Printf("scheduler start: %v", err)
+	}
+
 	log.Printf("zlt starting: %s", buildinfo.Summary())
 
 	if opts.Headless {
@@ -49,7 +53,7 @@ func RunWithOptions(opts RunOptions) error {
 }
 
 func newHTTPServer(runtime *Runtime, addr string) *http.Server {
-	apiServer := api.NewServer(runtime, runtime, autoStartAPIAdapter{})
+	apiServer := api.NewServer(runtime, runtime, autoStartAPIAdapter{}, runtime)
 	return &http.Server{
 		Addr:    addr,
 		Handler: apiServer.Handler(),

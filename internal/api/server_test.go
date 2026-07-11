@@ -121,6 +121,7 @@ func TestBuildTaskItemsMatchesStates(t *testing.T) {
 			states: []process.RuntimeState{{TaskID: "openlist", Status: process.StatusRunning, PID: 1234}},
 		},
 		nil,
+		nil,
 	)
 
 	items := server.buildTaskItems()
@@ -140,6 +141,7 @@ func TestHandleTaskEventsStreamsInitialSnapshot(t *testing.T) {
 		testManager{
 			states: []process.RuntimeState{{TaskID: "demo", Status: process.StatusStopped}},
 		},
+		nil,
 		nil,
 	).Handler())
 	defer server.Close()
@@ -177,7 +179,7 @@ func TestHandleTaskEventsStreamsInitialSnapshot(t *testing.T) {
 }
 
 func TestHandleAutoStartMethodGuard(t *testing.T) {
-	server := NewServer(testRuntime{}, testManager{}, nil)
+	server := NewServer(testRuntime{}, testManager{}, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/autostart", nil)
 	rec := httptest.NewRecorder()
 
@@ -191,7 +193,7 @@ func TestHandleAutoStartMethodGuard(t *testing.T) {
 func TestHandleAutoStartStatus(t *testing.T) {
 	server := NewServer(testRuntime{}, testManager{}, testAutoStart{
 		status: AutoStartStatus{Supported: true, Enabled: true, Status: "enabled"},
-	})
+	}, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/autostart", nil)
 	rec := httptest.NewRecorder()
 
@@ -214,7 +216,7 @@ func TestHandleAutoStartStatus(t *testing.T) {
 }
 
 func TestHandleAutoStartDisabledFallback(t *testing.T) {
-	server := NewServer(testRuntime{}, testManager{}, nil)
+	server := NewServer(testRuntime{}, testManager{}, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/autostart", nil)
 	rec := httptest.NewRecorder()
 
