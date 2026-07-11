@@ -75,3 +75,15 @@ Target capabilities:
 - [x] Support ANSI log rendering in the browser
 - [x] Expose system log `data/app.log` in the browser
 - [x] Keep log streaming and download support
+
+### 5. Cron scheduler
+
+- [x] Add Schedule model and SQLite `schedules` table (no FK: tasks table is rewritten on save)
+- [x] Add in-app cron scheduler (robfig/cron/v3, 5-field spec, per-schedule IANA timezone)
+- [x] Route all executions through Runtime (import replaces the process Manager wholesale)
+- [x] Skip semantics: already_running / already_stopped / overlapping run
+- [x] Disable orphan schedules after task import; refuse task deletion while schedules attached
+- [x] Stop scheduler first during shutdown
+- [x] Embed tzdata so named timezones work on Windows end-user machines
+- [x] Schedule CRUD + enable/disable/run API and web page
+- [x] Unit tests for store, scheduler, runtime, API; verified end-to-end against the real app

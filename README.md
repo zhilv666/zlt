@@ -51,6 +51,7 @@
 - 支持任务自动启动
 - 支持异常退出后自动重启
 - 支持健康检查与失败阈值配置
+- 支持 Cron 计划任务：定时启动、停止、重启已登记任务
 - 支持任务日志查看、下载、清空
 - 支持系统日志 `data/app.log` 查看
 - 支持 ANSI 彩色日志渲染
@@ -69,8 +70,9 @@
 │   ├── api/             # HTTP API
 │   ├── app/             # 运行时、托盘、CLI、自启动
 │   ├── process/         # 进程管理
+│   ├── scheduler/       # Cron 计划任务调度器
 │   ├── store/           # SQLite 持久化
-│   └── task/            # 任务模型
+│   └── task/            # 任务与计划模型
 ├── scripts/             # 构建与发布脚本
 ├── web/                 # 内嵌网页面板
 ├── ico.ico              # Windows 图标，固定放仓库根目录
@@ -233,6 +235,38 @@ Windows 可在网页里直接查看、启用、停用软件开机自启。
 - 推荐直接填写虚拟环境中的可执行文件
 - 相同的 `python3 main.py` 会结合工作目录做识别，避免不同项目混淆
 
+## 计划任务
+
+网页面板的“计划任务”页可以为已登记任务配置 Cron 定时动作：
+
+- 动作：`start`（启动）、`stop`（停止）、`restart`（重启）
+- 表达式：标准 5 段 Cron（`分 时 日 月 周`），例如 `0 8 * * 1-5` 表示工作日 08:00
+- 时区：默认跟随系统，可显式指定 IANA 时区（如 `Asia/Shanghai`）
+- 支持启用/停用、立即执行（便于测试配置）、下次执行时间与最近执行结果展示
+
+执行语义：
+
+- 任务已在运行时执行 `start`：跳过并记录 `already_running`
+- 任务已停止时执行 `stop`：跳过并记录 `already_stopped`
+- 同一计划上一次尚未结束时，下一次触发直接跳过
+- 计划保存时校验表达式与时区，非法配置直接拒绝
+- 任务被导入覆盖后，引用了不存在任务的计划会自动停用并记录原因
+- 任务存在关联计划时不允许直接删除，需先删除计划
+
+注意：计划由驻令台进程内的调度器执行，应用未运行时不会触发。建议生产环境配合“软件开机自启”或 `zlt start` 后台模式使用。
+
+对应 API：
+
+```text
+GET    /api/schedules
+POST   /api/schedules
+PUT    /api/schedules/{id}
+DELETE /api/schedules/{id}
+POST   /api/schedules/{id}/enable
+POST   /api/schedules/{id}/disable
+POST   /api/schedules/{id}/run
+```
+
 ## 效果图
 
 当前界面分为两部分：
@@ -333,8 +367,8 @@ go test ./...
 
 - 任务配置使用 SQLite 持久化
 - 托盘和网页共享同一套运行时状态
-- 启动时先起托盘，再处理自动启动任务
-- 退出时先停任务，再关闭 HTTP 和托盘
+- 启动时先起 HTTP 与 Cron 调度器，再处理自动启动任务
+- 退出时先停调度器，再停任务，最后关闭 HTTP 和托盘
 - Windows、Linux、macOS 都有对应构建流程
 - Go module 名称为 `zhulingtai`
 - 最终用户使用的命令名称为 `zlt`
