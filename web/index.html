@@ -1315,8 +1315,7 @@
             </div>
             <div class="actions-group">
               <button class="btn btn-sm" id="autostart-refresh">刷新</button>
-              <button class="btn btn-sm btn-primary" id="autostart-enable">启用</button>
-              <button class="btn btn-sm btn-danger" id="autostart-disable">停用</button>
+              <button class="btn btn-sm btn-primary" id="autostart-toggle" disabled>启用</button>
             </div>
           </div>
         </div>
@@ -1780,20 +1779,17 @@
     function renderAutoStartStatus(status) {
       currentAutoStartStatus = status || null;
       const summary = document.getElementById('autostart-summary');
-      const enableBtn = document.getElementById('autostart-enable');
-      const disableBtn = document.getElementById('autostart-disable');
+      const toggleBtn = document.getElementById('autostart-toggle');
 
-      if (!status) {
-        summary.textContent = '无法获取开机自启状态';
-        enableBtn.disabled = true;
-        disableBtn.disabled = true;
-        return;
-      }
+      toggleBtn.classList.remove('btn-primary', 'btn-danger');
 
-      if (!status.supported) {
-        summary.textContent = status.message || '当前平台不支持网页控制开机自启';
-        enableBtn.disabled = true;
-        disableBtn.disabled = true;
+      if (!status || !status.supported) {
+        summary.textContent = !status
+          ? '无法获取开机自启状态'
+          : (status.message || '当前平台不支持网页控制开机自启');
+        toggleBtn.textContent = '启用';
+        toggleBtn.classList.add('btn-primary');
+        toggleBtn.disabled = true;
         return;
       }
 
@@ -1802,8 +1798,9 @@
         text += ' | ' + status.unit_path;
       }
       summary.textContent = text;
-      enableBtn.disabled = !!status.enabled;
-      disableBtn.disabled = !status.enabled;
+      toggleBtn.textContent = status.enabled ? '停用' : '启用';
+      toggleBtn.classList.add(status.enabled ? 'btn-danger' : 'btn-primary');
+      toggleBtn.disabled = false;
     }
 
     async function loadAutoStartStatus() {
@@ -2630,11 +2627,9 @@
     document.getElementById('autostart-refresh').addEventListener('click', () => {
       loadAutoStartStatus();
     });
-    document.getElementById('autostart-enable').addEventListener('click', () => {
-      updateAutoStart('enable');
-    });
-    document.getElementById('autostart-disable').addEventListener('click', () => {
-      updateAutoStart('disable');
+    document.getElementById('autostart-toggle').addEventListener('click', () => {
+      const enabled = currentAutoStartStatus && currentAutoStartStatus.enabled;
+      updateAutoStart(enabled ? 'disable' : 'enable');
     });
     document.querySelectorAll('.cron-preset').forEach((btn) => {
       btn.addEventListener('click', () => {
