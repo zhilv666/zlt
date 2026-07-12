@@ -202,18 +202,21 @@ POST   /api/schedules/{id}/run
 
 <details>
 <summary>界面截图</summary>
-
 任务列表：
 
-![任务列表](assets/image-20260524172150165.png)
+![image-20260712201052606](assets/image-20260712201052606.png)
+
+计划任务：
+
+![image-20260712201121772](assets/image-20260712201121772.png)
 
 日志查看：
 
-![日志查看](assets/image-20260524172229289.png)
+![image-20260712201147027](assets/image-20260712201147027.png)
 
 Windows 托盘菜单：
 
-![Windows 托盘菜单](assets/image-20260524172325815.png)
+![image-20260712201247947](assets/image-20260712201247947.png)
 
 Linux 无界面运行：
 
