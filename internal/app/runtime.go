@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"zhulingtai/internal/process"
+	"zhulingtai/internal/scheduler"
 	"zhulingtai/internal/store"
 	"zhulingtai/internal/task"
 )
@@ -21,7 +22,9 @@ type Runtime struct {
 	mu        sync.RWMutex
 	TaskStore *store.TaskStore
 	Tasks     []task.Config
+	Schedules []task.Schedule
 	Manager   *process.Manager
+	Sched     *scheduler.Scheduler
 	HTTP      *http.Server
 
 	autoStartOnce sync.Once
@@ -45,14 +48,20 @@ func NewRuntime() (*Runtime, error) {
 	if err := taskStore.Save(tasks); err != nil {
 		return nil, err
 	}
+	schedules, err := taskStore.LoadSchedules()
+	if err != nil {
+		return nil, err
+	}
 
 	manager := process.NewManager(tasks)
 
 	runtime := &Runtime{
 		TaskStore: taskStore,
 		Tasks:     tasks,
+		Schedules: schedules,
 		Manager:   manager,
 	}
+	runtime.Sched = scheduler.New(runtime, runtime.recordScheduleResult)
 
 	return runtime, nil
 }
@@ -66,6 +75,11 @@ func (r *Runtime) StartHTTP() error {
 
 func (r *Runtime) Shutdown(ctx context.Context) error {
 	r.shutdownOnce.Do(func() {
+		// Stop the scheduler first so no cron job fires new task operations
+		// while tasks are being stopped below.
+		if r.Sched != nil {
+			r.Sched.Stop(scheduleStopTimeout)
+		}
 		if err := r.StopAllTasks(); err != nil {
 			r.shutdownErr = err
 		}
@@ -168,6 +182,10 @@ func (r *Runtime) DeleteTask(taskID string) error {
 		return fmt.Errorf("task %q not found", taskID)
 	}
 
+	if n := r.countSchedulesForTaskLocked(taskID); n > 0 {
+		return fmt.Errorf("task %q has %d schedule(s) attached, delete them first", taskID, n)
+	}
+
 	if err := r.Manager.RemoveTask(taskID); err != nil {
 		return err
 	}
@@ -208,6 +226,13 @@ func (r *Runtime) ReplaceTasks(tasks []task.Config) error {
 		r.mu.Unlock()
 		return err
 	}
+	// Import may have removed tasks that schedules reference; keep those
+	// schedules but disable them so the scheduler never fires into a void.
+	if err := r.disableOrphanSchedulesLocked(); err != nil {
+		r.mu.Unlock()
+		return err
+	}
+	r.reloadSchedulerLocked()
 	r.mu.Unlock()
 	return r.applyAutoStart()
 }

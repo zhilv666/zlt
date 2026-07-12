@@ -187,14 +187,46 @@ jobs:
             cat notes-body.md
           } > entry.md
 
-          # 新片段插到顶部，保留历史（去掉旧文件的一级标题和紧随的空行）
+          # 拆分旧文件：保留标题后的说明文字与全部历史版本。
+          # 如果同一标签重新运行，跳过旧的同版本段落，避免重复追加。
+          if [ -f CHANGELOG.md ]; then
+            awk '
+              NR == 1 && /^# Changelog$/ { next }
+              /^## / { exit }
+              { print }
+            ' CHANGELOG.md > changelog-preamble.md
+
+            awk -v version="${GITHUB_REF_NAME}" '
+              /^## / {
+                in_history = 1
+              }
+              !in_history {
+                next
+              }
+              $0 ~ "^## " version " \\(" {
+                skip_version = 1
+                next
+              }
+              skip_version && /^## / {
+                skip_version = 0
+              }
+              !skip_version {
+                print
+              }
+            ' CHANGELOG.md > changelog-history.md
+          else
+            : > changelog-preamble.md
+            : > changelog-history.md
+          fi
+
+          # 固定顺序：标题、说明、新版本、旧版本。
           {
             echo "# Changelog"
             echo ""
+            sed '1{/^$/d;}; $ {/^$/d;}' changelog-preamble.md
+            echo ""
             cat entry.md
-            if [ -f CHANGELOG.md ]; then
-              sed '1{/^# Changelog$/d;}' CHANGELOG.md | sed '1{/^$/d;}'
-            fi
+            cat changelog-history.md
           } > CHANGELOG.new
           mv CHANGELOG.new CHANGELOG.md
 

@@ -8,107 +8,26 @@
 ![UI](https://img.shields.io/badge/UI-System%20Tray%20%2B%20Web-111827)
 ![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)
 
-驻令台适合管理这些常驻命令：
-
-- `openlist.exe server`
-- `gitea web`
-- `.venv/bin/ncatbot run`
-- `python3 main.py`
-- 其他本地脚本、守护进程、辅助服务
-
-它把职责拆成两层：
-
-- 托盘负责：快速启动、停止、退出、查看版本
-- 浏览器负责：任务管理、日志查看、状态观察、参数配置
-
-## 命名说明
-
-- 项目名：`驻令台`
-- 仓库名：`zhulingtai`
-- 可执行文件：`zlt`
-
-这三个名字分别服务于不同场景：
-
-- `驻令台` 用于产品展示、文档标题、界面文案
-- `zhulingtai` 用于仓库、Go module、源码路径
-- `zlt` 用于命令行、构建产物和发布包文件名
-
-## 为什么叫“驻令台”
-
-这个名字来自三个意思：
-
-- `驻`：强调常驻运行、后台守护、托盘常驻
-- `令`：强调命令、脚本、服务进程
-- `台`：强调统一管理入口，像一个控制台
-
-它不是单纯的“命令启动器”，而是一个面向本地服务管理的驻留控制台，所以叫“驻令台”。
+驻令台用于统一管理本地脚本、守护进程和辅助服务。托盘负责快速启停，浏览器面板负责任务配置、状态观察、计划调度和日志查看。
 
 ## 功能特性
 
-- 托盘菜单快速启动和停止任务
+- 托盘菜单快速启动、停止任务
 - 浏览器管理任务的增删改查
-- 任务配置持久化到 SQLite
-- 支持任务自动启动
-- 支持异常退出后自动重启
-- 支持健康检查与失败阈值配置
-- 支持任务日志查看、下载、清空
-- 支持系统日志 `data/app.log` 查看
-- 支持 ANSI 彩色日志渲染
-- 支持任务列表搜索、筛选和分页
-- 支持 Linux 无界面运行
-- 支持构建时注入版本、提交、平台、时间等信息
-- Windows 构建自动注入图标
+- SQLite 持久化任务和计划配置
+- 任务自动启动、异常重启和健康检查
+- Cron 计划任务定时启动、停止或重启任务
+- 任务日志与系统日志查看、下载和清理
+- ANSI 彩色日志渲染
+- 任务搜索、筛选和分页
+- Windows 软件开机自启与 Linux 无界面运行
+- Windows、Linux、macOS 跨平台构建与发布
 
-## 项目结构
-
-```text
-.
-├── cmd/
-│   └── zlt/             # CLI / GUI 入口
-├── internal/            # 核心实现
-│   ├── api/             # HTTP API
-│   ├── app/             # 运行时、托盘、CLI、自启动
-│   ├── process/         # 进程管理
-│   ├── store/           # SQLite 持久化
-│   └── task/            # 任务模型
-├── scripts/             # 构建与发布脚本
-├── web/                 # 内嵌网页面板
-├── ico.ico              # Windows 图标，固定放仓库根目录
-├── Taskfile.yml         # 常用任务
-└── embed_assets.go      # 静态资源嵌入
-```
-
-## 使用方式
-
-### 1. 构建
-
-当前项目使用 `Taskfile` 管理构建任务：
+## 快速开始
 
 ```sh
 task build:current
-task build:windows
-task build:linux
-task build:darwin
-```
-
-构建产物输出到：
-
-```text
-bin/
-```
-
-### 2. 运行
-
-当前平台直接运行：
-
-```sh
 ./bin/zlt-current
-```
-
-查看版本：
-
-```sh
-./bin/zlt-current version
 ```
 
 Windows GUI 版：
@@ -117,13 +36,62 @@ Windows GUI 版：
 ./bin/zlt-windows-amd64.exe
 ```
 
-默认控制面板地址：
+默认控制面板地址：`http://127.0.0.1:3719`
+
+> 每个版本的更新内容统一记录在 [CHANGELOG.md](./CHANGELOG.md)。
+
+<details>
+<summary>项目命名与设计理念</summary>
+
+- 项目名：`驻令台`
+- 仓库名：`zhulingtai`
+- 可执行文件：`zlt`
+
+“驻”表示常驻运行与后台守护，“令”表示命令、脚本和服务进程，“台”表示统一管理入口。驻令台不是单纯的命令启动器，而是面向本地服务管理的驻留控制台。
+
+</details>
+
+<details>
+<summary>项目结构</summary>
 
 ```text
-http://127.0.0.1:3719
+.
+├── cmd/zlt/             # CLI / GUI 入口
+├── internal/
+│   ├── api/             # HTTP API
+│   ├── app/             # 运行时、托盘、CLI、自启动
+│   ├── process/         # 进程管理
+│   ├── scheduler/       # Cron 计划任务调度器
+│   ├── store/           # SQLite 持久化
+│   └── task/            # 任务与计划模型
+├── scripts/             # 构建与发布脚本
+├── web/                 # 内嵌网页面板
+├── ico.ico              # Windows 图标
+├── Taskfile.yml         # 常用任务
+└── embed_assets.go      # 静态资源嵌入
 ```
 
-### 3. Linux 无界面模式
+</details>
+
+<details>
+<summary>构建与运行命令</summary>
+
+构建：
+
+```sh
+task build:current
+task build:windows
+task build:linux
+task build:darwin
+```
+
+查看版本：
+
+```sh
+./bin/zlt-current version
+```
+
+Linux 无界面模式：
 
 ```sh
 ./bin/zlt-linux-amd64 run
@@ -140,17 +108,7 @@ http://127.0.0.1:3719
 ./bin/zlt-linux-amd64 start --addr 0.0.0.0:3719
 ```
 
-帮助信息：
-
-```sh
-./bin/zlt-linux-amd64 -h
-./bin/zlt-linux-amd64 start -h
-./bin/zlt-linux-amd64 version
-```
-
-### 4. 软件开机自启
-
-Linux：
+Linux 软件开机自启：
 
 ```sh
 ./bin/zlt-linux-amd64 autostart enable
@@ -158,13 +116,12 @@ Linux：
 ./bin/zlt-linux-amd64 autostart disable
 ```
 
-当前 Linux 实现基于 `systemd --user`。
+Windows 可在网页“设置”页面查看、启用或停用软件开机自启。
 
-Windows 可在网页里直接查看、启用、停用软件开机自启。
+</details>
 
-## 任务配置示例
-
-### OpenList
+<details>
+<summary>任务配置示例</summary>
 
 ```json
 {
@@ -185,163 +142,119 @@ Windows 可在网页里直接查看、启用、停用软件开机自启。
 }
 ```
 
-### Python 脚本
+Python 虚拟环境建议直接填写解释器路径，不需要提前执行 `activate`：
 
 ```json
 {
-  "id": "cksd",
-  "name": "cksd",
-  "program": "/usr/bin/python3",
+  "id": "python-service",
+  "name": "Python Service",
+  "program": "/home/user/project/.venv/bin/python",
   "args": ["main.py"],
-  "workdir": "/home/ubuntu/code/cksd",
-  "env": [],
-  "autostart": false,
-  "restart_on_crash": false,
-  "stop_timeout_sec": 8,
-  "restart_delay_sec": 2,
-  "max_restart_count": 0,
-  "health_check_url": "",
-  "health_check_interval_sec": 0,
-  "health_check_failure_threshold": 0
+  "workdir": "/home/user/project",
+  "env": []
 }
 ```
 
-### Python 虚拟环境命令
+</details>
 
-```json
-{
-  "id": "ncatbot",
-  "name": "ncatbot",
-  "program": "/home/ubuntu/code/ncatbot/.venv/bin/ncatbot",
-  "args": ["run"],
-  "workdir": "/home/ubuntu/code/ncatbot",
-  "env": [],
-  "autostart": false,
-  "restart_on_crash": false,
-  "stop_timeout_sec": 8,
-  "restart_delay_sec": 2,
-  "max_restart_count": 0,
-  "health_check_url": "",
-  "health_check_interval_sec": 0,
-  "health_check_failure_threshold": 0
-}
+<details>
+<summary>Cron 计划任务</summary>
+
+网页“计划任务”页面可为已登记任务配置定时动作：
+
+- 动作：`start`、`stop`、`restart`
+- 表达式：标准 5 段 Cron，例如 `0 8 * * 1-5`
+- 时区：默认跟随系统，也可指定 `Asia/Shanghai` 等 IANA 时区
+- 支持启用、停用、立即执行、下次执行时间和最近执行结果
+
+执行规则：
+
+- 已运行任务再次执行 `start` 时跳过
+- 已停止任务再次执行 `stop` 时跳过
+- 同一计划上一次未结束时跳过重复触发
+- 非法 Cron 表达式或时区无法保存
+- 存在关联计划的任务不能直接删除
+- 驻令台未运行时，进程内计划不会触发
+
+API：
+
+```text
+GET    /api/schedules
+POST   /api/schedules
+PUT    /api/schedules/{id}
+DELETE /api/schedules/{id}
+POST   /api/schedules/{id}/enable
+POST   /api/schedules/{id}/disable
+POST   /api/schedules/{id}/run
 ```
 
-说明：
+</details>
 
-- 不需要先执行 `activate`
-- 推荐直接填写虚拟环境中的可执行文件
-- 相同的 `python3 main.py` 会结合工作目录做识别，避免不同项目混淆
+<details>
+<summary>日志说明</summary>
 
-## 效果图
+- 任务日志写入 `data/logs/<task_id>/app.log`
+- 旧版 `stdout.log` 和 `stderr.log` 仍可兼容读取
+- 系统日志写入 `data/app.log`
+- 网页支持 ANSI 彩色渲染、纯文本切换、下载和清理
 
-当前界面分为两部分：
+</details>
 
-- 托盘菜单：适合快速启停任务
-- 浏览器面板：适合任务管理和日志查看
+<details>
+<summary>界面截图</summary>
 
-建议在开源发布时补充以下截图到仓库中，例如 `docs/images/`：
+任务列表：
 
-- 任务列表页
+![任务列表](assets/image-20260524172150165.png)
 
-  ![image-20260524172150165](assets/image-20260524172150165.png)
+日志查看：
 
-- 日志查看页
+![日志查看](assets/image-20260524172229289.png)
 
-  ![image-20260524172229289](assets/image-20260524172229289.png)
+Windows 托盘菜单：
 
-- Windows 托盘菜单
+![Windows 托盘菜单](assets/image-20260524172325815.png)
 
-  ![image-20260524172325815](assets/image-20260524172325815.png)
+Linux 无界面运行：
 
-- Linux 无界面运行示例
-  ![image-20260524174837383](assets/image-20260524174837383.png)
+![Linux 无界面运行](assets/image-20260524174837383.png)
 
-## 日志说明
+</details>
 
-任务日志行为：
+<details>
+<summary>发布与开发</summary>
 
-- 每个任务统一写入 `data/logs/<task_id>/app.log`
-- 旧版本遗留的 `stdout.log` 和 `stderr.log` 仍可兼容读取
-- 网页支持 ANSI 彩色渲染和纯文本切换
-
-系统日志行为：
-
-- 程序自身日志写入 `data/app.log`
-- 网页日志页可直接查看系统日志
-
-## 发布
+环境要求：Go 1.25+，推荐安装 `task`。
 
 ```sh
 task version
 task release:windows
 task release:linux
 task release:darwin
-```
-
-GitHub Actions 已内置两套工作流：
-
-- `CI`：在 `push main` 和 `pull request` 时自动执行 `go test ./...` 与跨平台构建检查
-- `Release`：在推送 `v*` 标签时自动打包 Windows、Linux、macOS 产物，并发布到 GitHub Release
-
-发布 GitHub 版本的推荐流程：
-
-```sh
-git tag v0.2.1
-git push origin main --tags
-```
-
-发布目录：
-
-```text
-dist/<version>/
-```
-
-说明：
-
-- Windows 产物输出为 `.exe`
-- Linux 和 macOS 产物输出为 `.tar.gz`
-- Linux 和 macOS 压缩包在打包前会自动写入可执行权限
-- GitHub Release 会额外上传 `SHA256SUMS.txt` 供校验使用
-
-## 开发
-
-### 环境要求
-
-- Go 1.25+
-- `task`（推荐）
-
-### 常用命令
-
-```sh
-task version
-task build:current
-task build:windows
-task build:linux
-task build:darwin
 go test ./...
 ```
 
-### 开发约定
+推送 `v*` 标签后，GitHub Actions 会自动构建 Windows、Linux、macOS 产物，生成 Release Notes，并更新 [CHANGELOG.md](./CHANGELOG.md)。
 
-- `ico.ico` 固定放在仓库根目录
-- `web/` 保持在仓库根目录
-- `data/` 是本地运行数据目录，不参与提交
-- `bin/`、`dist/`、`.gocache/`、`.gomodcache/`、`.gotmp/`、`.tools/` 都是构建产物或缓存
+```sh
+git tag v0.2.6
+git push origin main --tags
+```
 
-### 当前实现重点
+发布产物位于 `dist/<version>/`。Windows 使用 `.exe`，Linux 和 macOS 使用 `.tar.gz`，并提供 `SHA256SUMS.txt`。
 
-- 任务配置使用 SQLite 持久化
-- 托盘和网页共享同一套运行时状态
-- 启动时先起托盘，再处理自动启动任务
-- 退出时先停任务，再关闭 HTTP 和托盘
-- Windows、Linux、macOS 都有对应构建流程
-- Go module 名称为 `zhulingtai`
-- 最终用户使用的命令名称为 `zlt`
+开发约定：
+
+- `ico.ico`、`web/` 固定保留在仓库根目录
+- `data/` 为本地运行数据，不参与提交
+- `bin/`、`dist/`、`.gocache/`、`.gomodcache/`、`.gotmp/`、`.tools/` 为构建产物或缓存
+
+</details>
 
 ## 社区支持
 
 <div align="center">
+
 **学 AI，上 L 站**
 
 [![LINUX DO](https://img.shields.io/badge/LINUX%20DO-社区-gray?style=flat-square)](https://linux.do/) [![社区支持](https://img.shields.io/badge/社区支持-交流-blue?style=flat-square)](https://linux.do/)

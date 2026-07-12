@@ -39,6 +39,7 @@ type Server struct {
 	runtime   Runtime
 	manager   ProcessManager
 	autostart AutoStartManager
+	schedules ScheduleManager
 }
 
 type AutoStartManager interface {
@@ -66,11 +67,12 @@ type taskItem struct {
 	Status process.RuntimeState `json:"status"`
 }
 
-func NewServer(runtime Runtime, manager ProcessManager, autostart AutoStartManager) *Server {
+func NewServer(runtime Runtime, manager ProcessManager, autostart AutoStartManager, schedules ScheduleManager) *Server {
 	return &Server{
 		runtime:   runtime,
 		manager:   manager,
 		autostart: autostart,
+		schedules: schedules,
 	}
 }
 
@@ -89,6 +91,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/tasks/", s.handleTaskAction)
 	mux.HandleFunc("/api/tasks-export", s.handleTasksExport)
 	mux.HandleFunc("/api/tasks-import", s.handleTasksImport)
+	mux.HandleFunc("/api/schedules", s.handleSchedules)
+	mux.HandleFunc("/api/schedules/", s.handleScheduleAction)
 	return mux
 }
 
