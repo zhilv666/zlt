@@ -448,17 +448,15 @@
     .status-stopped, .status-exited { color: var(--text-muted); background: var(--surface-3); border-color: var(--border); }
     .status-failed { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
 
-    /* Schedule badges reuse the same palette tokens: run results have no
-       pulsing dot, action chips describe what the plan does. */
-    .run-success { color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
-    .run-skipped { color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 30%, transparent); }
-    .run-failed { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
-    .run-success::before, .run-skipped::before, .run-failed::before { animation: none; }
+    /* Schedule badges/text reuse the same palette tokens. The enabled badge
+       has no pulsing dot; run results render as colored text, not pills. */
+    .sch-on { color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
+    .sch-off { color: var(--text-muted); background: var(--surface-3); border-color: var(--border); }
+    .sch-on::before, .sch-off::before { animation: none; }
 
-    .act-start { color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
-    .act-stop { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
-    .act-restart { color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 30%, transparent); }
-    .act-start::before, .act-stop::before, .act-restart::before { animation: none; }
+    .run-text-success { color: var(--success); font-weight: 600; }
+    .run-text-skipped { color: var(--warning); font-weight: 600; }
+    .run-text-failed { color: var(--danger); font-weight: 600; }
 
     /* ===== Schedule list ===== */
     .schedule-item {
@@ -1161,13 +1159,17 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
             <span>任务列表</span>
           </button>
+          <button class="nav-link" onclick="switchTab('schedules')" id="tab-btn-schedules">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+            <span>计划任务</span>
+          </button>
           <button class="nav-link" onclick="switchTab('logs')" id="tab-btn-logs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             <span>日志查看</span>
           </button>
-          <button class="nav-link" onclick="switchTab('schedules')" id="tab-btn-schedules">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
-            <span>计划任务</span>
+          <button class="nav-link" onclick="switchTab('settings')" id="tab-btn-settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>设置</span>
           </button>
         </div>
 
@@ -1180,27 +1182,6 @@
 
     <!-- Tab 1: Task List -->
     <div class="tab-content active" id="tab-tasks">
-      <div class="card system-card">
-        <div class="card-body">
-          <div class="system-row">
-            <div class="system-head">
-              <div class="system-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 2a7 7 0 0 1 7 7c0 3-2 5-2 8H7c0-3-2-5-2-8a7 7 0 0 1 7-7z"/><path d="M9 21h6"/></svg>
-              </div>
-              <div>
-                <div class="card-title" style="font-size:1.02rem;">软件开机自启</div>
-                <div class="system-meta" id="autostart-summary">加载中...</div>
-                <div class="system-meta">检测结果会写入 <code>data/app.log</code></div>
-              </div>
-            </div>
-            <div class="actions-group">
-              <button class="btn btn-sm" id="autostart-refresh">刷新</button>
-              <button class="btn btn-sm btn-primary" id="autostart-enable">启用</button>
-              <button class="btn btn-sm btn-danger" id="autostart-disable">停用</button>
-            </div>
-          </div>
-        </div>
-      </div>
       <div class="card">
         <div class="card-header task-header">
           <div class="task-header-row">
@@ -1313,6 +1294,31 @@
         </div>
         <div class="card-body card-body-no-pad" id="schedule-list">
           <div class="empty-state">加载中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 4: Settings -->
+    <div class="tab-content" id="tab-settings">
+      <div class="card system-card">
+        <div class="card-body">
+          <div class="system-row">
+            <div class="system-head">
+              <div class="system-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 2a7 7 0 0 1 7 7c0 3-2 5-2 8H7c0-3-2-5-2-8a7 7 0 0 1 7-7z"/><path d="M9 21h6"/></svg>
+              </div>
+              <div>
+                <div class="card-title" style="font-size:1.02rem;">软件开机自启</div>
+                <div class="system-meta" id="autostart-summary">加载中...</div>
+                <div class="system-meta">检测结果会写入 <code>data/app.log</code></div>
+              </div>
+            </div>
+            <div class="actions-group">
+              <button class="btn btn-sm" id="autostart-refresh">刷新</button>
+              <button class="btn btn-sm btn-primary" id="autostart-enable">启用</button>
+              <button class="btn btn-sm btn-danger" id="autostart-disable">停用</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1839,6 +1845,10 @@
       } else {
         stopScheduleTimer();
       }
+
+      if (tabId === 'settings') {
+        loadAutoStartStatus();
+      }
     }
 
     // Modal Control
@@ -2346,34 +2356,38 @@
         const sch = item.schedule;
         const busy = scheduleActionInFlight.has(sch.id);
         const actionLabel = SCHEDULE_ACTION_LABELS[sch.action] || sch.action;
+        const idChip = sch.name === sch.id
+          ? ''
+          : ' <span style="color:var(--text-muted);font-weight:normal;font-size:0.85rem;">(' + escapeHTML(sch.id) + ')</span>';
         const taskLabel = item.task_exists
           ? escapeHTML(item.task_name) + ' <span style="color:var(--text-faint);">(' + escapeHTML(sch.task_id) + ')</span>'
           : '<span style="color:var(--danger);">任务不存在 (' + escapeHTML(sch.task_id) + ')</span>';
 
         const lastRun = sch.last_status
-          ? '<div class="badge run-' + escapeHTML(sch.last_status) + '">' + (SCHEDULE_RUN_LABELS[sch.last_status] || escapeHTML(sch.last_status)) + '</div>' +
-            '<div class="task-meta" style="margin-top:4px;">' + formatScheduleTime(sch.last_run_at) + '</div>' +
-            (sch.last_detail ? '<span class="' + (sch.last_status === 'failed' ? 'error-text' : 'task-meta') + '" style="margin-top:4px;display:block;white-space:normal;" title="' + escapeHTML(sch.last_detail) + '">' + escapeHTML(sch.last_detail) + '</span>' : '')
-          : '<div class="task-meta">尚未执行</div>';
+          ? '<span class="run-text-' + escapeHTML(sch.last_status) + '">' + (SCHEDULE_RUN_LABELS[sch.last_status] || escapeHTML(sch.last_status)) + '</span>' +
+            ' · ' + formatScheduleTime(sch.last_run_at)
+          : '尚未执行';
+        const lastDetail = sch.last_detail
+          ? '<span class="' + (sch.last_status === 'failed' ? 'error-text' : 'task-meta') + '" style="margin-top:4px;display:block;white-space:normal;" title="' + escapeHTML(sch.last_detail) + '">' + escapeHTML(sch.last_detail) + '</span>'
+          : '';
 
         const row = document.createElement('div');
         row.className = 'schedule-item' + (sch.enabled ? '' : ' schedule-disabled');
         row.innerHTML =
           '<div>' +
-            '<div class="task-name">' + escapeHTML(sch.name) + ' <span style="color:var(--text-muted);font-weight:normal;font-size:0.85rem;">(' + escapeHTML(sch.id) + ')</span></div>' +
+            '<div class="task-name">' + escapeHTML(sch.name) + idChip + '</div>' +
             '<div style="margin-bottom:0.3rem;"><span class="cron-chip">' + escapeHTML(sch.cron_expr) + '</span>' +
               (sch.timezone ? ' <span class="task-meta" style="display:inline;">' + escapeHTML(sch.timezone) + '</span>' : '') +
             '</div>' +
-            '<div class="task-meta">目标任务: ' + taskLabel + '</div>' +
+            '<div class="task-meta">定时' + escapeHTML(actionLabel) + ': ' + taskLabel + '</div>' +
           '</div>' +
           '<div>' +
-            '<div class="badge act-' + escapeHTML(sch.action) + '">' + escapeHTML(actionLabel) + '</div>' +
-            '<div class="task-meta" style="margin-top:6px;">' + (sch.enabled ? '已启用' : '已停用') + '</div>' +
+            '<div class="badge ' + (sch.enabled ? 'sch-on' : 'sch-off') + '">' + (sch.enabled ? '已启用' : '已停用') + '</div>' +
           '</div>' +
           '<div>' +
             '<div class="task-meta">下次执行: <strong>' + (sch.enabled ? formatScheduleTime(item.next_run_at) : '—') + '</strong></div>' +
-            '<div class="task-meta" style="margin-top:6px;">最近执行:</div>' +
-            lastRun +
+            '<div class="task-meta" style="margin-top:4px;">最近执行: ' + lastRun + '</div>' +
+            lastDetail +
           '</div>' +
           '<div class="actions-group">' +
             '<button class="btn btn-sm btn-primary" data-id="' + escapeHTML(sch.id) + '" data-action="run"' + (busy ? ' disabled' : '') + '>' + (busy ? '执行中...' : '立即执行') + '</button>' +
