@@ -2,6 +2,22 @@
 
 本文件集中记录驻令台各版本的重要变化。后续正式版本发布时，GitHub Actions 会自动将新版本内容插入到文件顶部。
 
+## v0.2.6 (2026-07-12)
+
+### Features
+
+- 💄 feat(web): 计划任务立即执行改用 toast 提示 (dffa921)
+- 💄 feat(web): 开机自启启用/停用合并为单个切换按钮 (6e2f24a)
+- 💄 feat(web): 计划任务前移并新增设置页,优化计划行 (92db40d)
+- ✨ feat(web): 新增计划任务管理页面 (fc8833d)
+- ✨ feat(scheduler): 新增应用内 Cron 计划任务调度 (3a7d438)
+
+### Documentation
+
+- 📝 docs(readme): 更新界面展示截图 (9adf5f8)
+- 📝 docs(release): 统一版本日志与项目文档 (4263b27)
+- 📝 docs: 补充 Cron 计划任务说明 (0eacf70)
+
 ## v0.2.5 (2026-07-11)
 
 ### Features
