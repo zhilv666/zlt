@@ -63,6 +63,12 @@ func NewRuntime() (*Runtime, error) {
 	}
 	runtime.Sched = scheduler.New(runtime, runtime.recordScheduleResult)
 
+	// Apply persisted settings (log level + rotation limits) over the bootstrap
+	// defaults now that the store is available.
+	if settings, err := taskStore.LoadSettings(); err == nil {
+		runtime.applySettings(settings)
+	}
+
 	return runtime, nil
 }
 
@@ -222,6 +228,11 @@ func (r *Runtime) ReplaceTasks(tasks []task.Config) error {
 	r.mu.Lock()
 	r.Tasks = normalized
 	r.Manager = process.NewManager(normalized)
+	// A fresh manager starts at default rotation limits; restore the persisted
+	// task-log settings so an import does not silently reset them.
+	if settings, err := r.TaskStore.LoadSettings(); err == nil {
+		r.Manager.SetLogLimits(int64(settings.TaskLogMaxSizeMB)*megabyte, settings.TaskLogMaxBackups)
+	}
 	if err := r.TaskStore.Save(r.Tasks); err != nil {
 		r.mu.Unlock()
 		return err

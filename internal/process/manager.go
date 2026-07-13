@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"zhulingtai/internal/logging"
@@ -57,6 +58,12 @@ type managedProcess struct {
 type Manager struct {
 	mu    sync.RWMutex
 	procs map[string]*managedProcess
+
+	// Task-log rotation limits, adjustable at runtime via SetLogLimits. Read on
+	// every Start so new/restarted tasks pick up changes; running tasks are
+	// updated in place by SetLogLimits.
+	logMaxSize    atomic.Int64
+	logMaxBackups atomic.Int32
 }
 
 type stopReason string
@@ -70,6 +77,8 @@ func NewManager(tasks []task.Config) *Manager {
 	manager := &Manager{
 		procs: make(map[string]*managedProcess, len(tasks)),
 	}
+	manager.logMaxSize.Store(maxLogSizeBytes)
+	manager.logMaxBackups.Store(maxLogBackups)
 	for _, cfg := range tasks {
 		state := RuntimeState{
 			TaskID: cfg.ID,
@@ -124,6 +133,22 @@ func (m *Manager) State(taskID string) (RuntimeState, bool) {
 		return RuntimeState{}, false
 	}
 	return proc.state, true
+}
+
+// SetLogLimits updates task-log rotation limits. New/restarted tasks read the
+// new values, and any currently running task's writer is updated in place so the
+// change is felt immediately.
+func (m *Manager) SetLogLimits(maxSize int64, maxBackups int) {
+	m.logMaxSize.Store(maxSize)
+	m.logMaxBackups.Store(int32(maxBackups))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, proc := range m.procs {
+		if proc.logFile != nil {
+			proc.logFile.SetLimits(maxSize, maxBackups)
+		}
+	}
 }
 
 func (m *Manager) ClearLogs(taskID string) error {
@@ -246,7 +271,7 @@ func (m *Manager) Start(taskID string) error {
 	// The rotating writer enforces the size cap on every write, so a long-lived
 	// chatty task can never grow its log without bound. The previous size check
 	// only ran here at start time and was skipped for the entire run.
-	logFile, err := logging.NewRotatingWriter(logPath, maxLogSizeBytes, maxLogBackups)
+	logFile, err := logging.NewRotatingWriter(logPath, m.logMaxSize.Load(), int(m.logMaxBackups.Load()))
 	if err != nil {
 		proc.state.Status = StatusFailed
 		proc.state.LastError = err.Error()

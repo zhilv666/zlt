@@ -82,7 +82,7 @@ func handleAlreadyRunning(lockPath string, opts RunOptions) error {
 }
 
 func newHTTPServer(runtime *Runtime, addr string) *http.Server {
-	apiServer := api.NewServer(runtime, runtime, autoStartAPIAdapter{}, runtime)
+	apiServer := api.NewServer(runtime, runtime, autoStartAPIAdapter{}, runtime, runtime)
 	return &http.Server{
 		Addr:    addr,
 		Handler: apiServer.Handler(),

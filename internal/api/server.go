@@ -41,12 +41,19 @@ type Server struct {
 	manager   ProcessManager
 	autostart AutoStartManager
 	schedules ScheduleManager
+	settings  SettingsManager
 }
 
 type AutoStartManager interface {
 	Status() (AutoStartStatus, error)
 	Enable() error
 	Disable() error
+}
+
+// SettingsManager reads and writes the persisted application settings.
+type SettingsManager interface {
+	Settings() (task.Settings, error)
+	UpdateSettings(task.Settings) (task.Settings, error)
 }
 
 type AutoStartStatus struct {
@@ -68,12 +75,13 @@ type taskItem struct {
 	Status process.RuntimeState `json:"status"`
 }
 
-func NewServer(runtime Runtime, manager ProcessManager, autostart AutoStartManager, schedules ScheduleManager) *Server {
+func NewServer(runtime Runtime, manager ProcessManager, autostart AutoStartManager, schedules ScheduleManager, settings SettingsManager) *Server {
 	return &Server{
 		runtime:   runtime,
 		manager:   manager,
 		autostart: autostart,
 		schedules: schedules,
+		settings:  settings,
 	}
 }
 
@@ -81,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/build-info", s.handleBuildInfo)
+	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/system-log", s.handleSystemLog)
 	mux.HandleFunc("/api/system-log-stream", s.handleSystemLogStream)
 	mux.HandleFunc("/api/system-log-download", s.handleSystemLogDownload)
@@ -118,6 +127,37 @@ func (s *Server) handleBuildInfo(w http.ResponseWriter, r *http.Request) {
 		Msg:  "ok",
 		Data: buildinfo.Current(),
 	})
+}
+
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if s.settings == nil {
+		writeJSON(w, http.StatusOK, response{Code: 1, Msg: "settings unavailable"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		current, err := s.settings.Settings()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, response{Code: 1, Msg: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, response{Code: 0, Msg: "ok", Data: current})
+	case http.MethodPut, http.MethodPost:
+		var payload task.Settings
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: "invalid json"})
+			return
+		}
+		saved, err := s.settings.UpdateSettings(payload)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, response{Code: 0, Msg: "saved", Data: saved})
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+	}
 }
 
 func (s *Server) handleSystemLog(w http.ResponseWriter, r *http.Request) {
