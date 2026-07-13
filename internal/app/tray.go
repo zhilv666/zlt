@@ -5,8 +5,6 @@ package app
 import (
 	"context"
 	"log"
-	"os/exec"
-	"runtime"
 	"sync"
 	"time"
 
@@ -173,15 +171,4 @@ func isTaskRunning(status string) bool {
 func (c *trayController) initVersionMenu() {
 	info := buildinfo.Current()
 	_ = systray.AddMenuItem("Version: "+buildinfo.DisplayVersion(info.Version), "Version")
-}
-
-func openBrowser(url string) {
-	switch runtime.GOOS {
-	case "windows":
-		_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	case "darwin":
-		_ = exec.Command("open", url).Start()
-	default:
-		_ = exec.Command("xdg-open", url).Start()
-	}
 }
