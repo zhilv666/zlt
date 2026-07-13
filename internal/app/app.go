@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -17,18 +19,27 @@ func Run() error {
 func RunWithOptions(opts RunOptions) error {
 	initAppLogger()
 
+	// Single-instance guard: every serving mode (tray, foreground run, and the
+	// detached daemon child) funnels through here, so acquiring the lock before
+	// we touch the database or bind the HTTP port keeps a second launch from
+	// clobbering the running instance. An empty PIDFile means "use the default",
+	// so the plain `zlt` / double-click path is guarded too.
+	lockPath := opts.PIDFile
+	if lockPath == "" {
+		lockPath = defaultPIDFile()
+	}
+	lock, err := acquirePIDFile(lockPath, opts.Addr)
+	if err != nil {
+		if errors.Is(err, errAlreadyRunning) {
+			return handleAlreadyRunning(lockPath, opts)
+		}
+		return err
+	}
+	defer lock.Release()
+
 	runtime, err := NewRuntime()
 	if err != nil {
 		return err
-	}
-
-	var lock *pidLock
-	if opts.PIDFile != "" {
-		lock, err = acquirePIDFile(opts.PIDFile, opts.Addr)
-		if err != nil {
-			return err
-		}
-		defer lock.Release()
 	}
 
 	runtime.HTTP = newHTTPServer(runtime, opts.Addr)
@@ -50,6 +61,24 @@ func RunWithOptions(opts RunOptions) error {
 		return runHeadless(runtime)
 	}
 	return runTray(runtime)
+}
+
+// handleAlreadyRunning reacts to a launch that lost the single-instance race.
+// A headless/daemon start returns a non-zero error so scripts notice; an
+// interactive launch (tray / double-click) instead surfaces the instance that
+// is already serving by opening its dashboard, then exits cleanly.
+func handleAlreadyRunning(lockPath string, opts RunOptions) error {
+	existing, err := readPIDFile(lockPath)
+	if err != nil {
+		return errAlreadyRunning
+	}
+	if opts.Headless {
+		return fmt.Errorf("驻令台 已在运行 (pid %d)，请勿重复启动", existing.PID)
+	}
+	url := dashboardURL(existing.Addr)
+	log.Printf("zlt already running (pid %d); opening existing dashboard %s", existing.PID, url)
+	openBrowser(url)
+	return nil
 }
 
 func newHTTPServer(runtime *Runtime, addr string) *http.Server {

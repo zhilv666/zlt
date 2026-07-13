@@ -14,6 +14,12 @@ import (
 const createNoWindow = 0x08000000
 
 func startDetached(pidFile string, addr string) error {
+	// Fail fast with a clear message instead of spawning a doomed child that
+	// would lose the single-instance race.
+	if err := ensureNotRunning(pidFile); err != nil {
+		return err
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -37,7 +43,10 @@ func startDetached(pidFile string, addr string) error {
 	}
 	defer stderrFile.Close()
 
-	args := []string{"run"}
+	// The child owns the pid file (and thus the single-instance lock) via
+	// --pid-file; the parent must not pre-write it or the child would see the
+	// lock already taken and refuse to start.
+	args := []string{"run", "--pid-file", pidFile}
 	if addr != "" {
 		args = append(args, "--addr", addr)
 	}
@@ -54,15 +63,7 @@ func startDetached(pidFile string, addr string) error {
 		return err
 	}
 
-	if _, err := writePIDFile(pidFile, pidFilePayload{
-		PID:  cmd.Process.Pid,
-		Addr: addr,
-	}); err != nil {
-		_ = cmd.Process.Kill()
-		return err
-	}
-
-	return nil
+	return waitForDetachedStart(pidFile, cmd.Process.Pid, stderrPath)
 }
 
 func stopDetached(pidFile string) error {

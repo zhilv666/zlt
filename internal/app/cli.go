@@ -91,6 +91,15 @@ func runCommand(args []string) error {
 			}
 			opts.Addr = args[i+1]
 			i++
+		case "--pid-file":
+			// Used by the detached daemon so the child owns the single-instance
+			// lock (and so `status`/`stop` can find it). Foreground runs may set
+			// it too; an empty value falls back to the default in RunWithOptions.
+			if i+1 >= len(args) {
+				return errors.New("missing value for --pid-file")
+			}
+			opts.PIDFile = args[i+1]
+			i++
 		default:
 			if isHelpArg(args[i]) {
 				printHelp()
@@ -164,6 +173,13 @@ func statusCommand(args []string) error {
 		return err
 	}
 
+	// A pid file can linger after an unclean exit; only report "running" when the
+	// recorded process is actually alive and still us.
+	if !processMatches(lock.PID, lock.Exe) {
+		fmt.Println("stopped")
+		return nil
+	}
+
 	addr := lock.Addr
 	if addr == "" {
 		addr = defaultHTTPAddr
@@ -216,7 +232,7 @@ func helpText() string {
 
 用法:
   zlt
-  zlt run [--addr <host:port>] [--workdir <path>]
+  zlt run [--addr <host:port>] [--pid-file <path>] [--workdir <path>]
   zlt start [--addr <host:port>] [--pid-file <path>]
   zlt stop [--pid-file <path>]
   zlt restart [--addr <host:port>] [--pid-file <path>]
@@ -236,6 +252,10 @@ func helpText() string {
   zlt start
     以后端常驻方式启动
 
+  单例运行:
+    同一工作目录下仅允许一个实例运行。重复启动时，托盘模式会打开已运行
+    实例的控制面板，命令行模式会报错退出。
+
 参数:
   --addr, --listen
     指定 HTTP 监听地址，例如:
@@ -243,7 +263,7 @@ func helpText() string {
     0.0.0.0:3719
 
   --pid-file
-    指定后台进程状态文件路径
+    指定进程状态/单例锁文件路径 (默认 data/zlt.pid)
 `
 }
 
