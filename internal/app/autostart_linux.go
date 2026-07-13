@@ -4,7 +4,6 @@ package app
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,23 +20,23 @@ func enableAutostart() error {
 
 	exe, err := os.Executable()
 	if err != nil {
-		log.Printf("autostart linux enable: resolve executable failed: %v", err)
+		autostartLog().Error("enable: resolve executable failed", "err", err)
 		return err
 	}
 
 	unitPath, err := systemdUnitPath()
 	if err != nil {
-		log.Printf("autostart linux enable: unit path failed: %v", err)
+		autostartLog().Error("enable: resolve unit path failed", "err", err)
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
-		log.Printf("autostart linux enable: mkdir failed: %v", err)
+		autostartLog().Error("enable: mkdir failed", "err", err)
 		return err
 	}
 
 	workdir, err := os.Getwd()
 	if err != nil {
-		log.Printf("autostart linux enable: getwd failed: %v", err)
+		autostartLog().Error("enable: getwd failed", "err", err)
 		return err
 	}
 
@@ -58,10 +57,10 @@ WantedBy=default.target
 `, workdir, exe)) + "\n"
 
 	if err := os.WriteFile(unitPath, []byte(content), 0o644); err != nil {
-		log.Printf("autostart linux enable: write unit failed: %v", err)
+		autostartLog().Error("enable: write unit failed", "err", err)
 		return err
 	}
-	log.Printf("autostart linux enable: wrote unit=%s", unitPath)
+	autostartLog().Info("enabled", "unit", unitPath)
 
 	if err := runSystemctl("--user", "daemon-reload"); err != nil {
 		return err
@@ -82,13 +81,13 @@ func disableAutostart() error {
 
 	unitPath, err := systemdUnitPath()
 	if err != nil {
-		log.Printf("autostart linux disable: unit path failed: %v", err)
+		autostartLog().Error("disable: resolve unit path failed", "err", err)
 		return err
 	}
 
 	_ = runSystemctl("--user", "disable", "--now", systemdServiceName)
 	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
-		log.Printf("autostart linux disable: remove unit failed: %v", err)
+		autostartLog().Error("disable: remove unit failed", "err", err)
 		return err
 	}
 	if err := runSystemctl("--user", "daemon-reload"); err != nil {
@@ -107,10 +106,10 @@ func statusAutostart() error {
 
 	status, err := getAutoStartStatus()
 	if err != nil {
-		log.Printf("autostart linux status: err=%v", err)
+		autostartLog().Error("status query failed", "err", err)
 		return err
 	}
-	log.Printf("autostart linux status: status=%s enabled=%v unit=%s", status.Status, status.Enabled, status.UnitPath)
+	autostartLog().Debug("status", "status", status.Status, "enabled", status.Enabled, "unit", status.UnitPath)
 	fmt.Printf("autostart: %s\n", status.Status)
 	return nil
 }
@@ -136,7 +135,7 @@ func getAutoStartStatus() (AutoStartStatus, error) {
 	cmd := exec.Command("systemctl", "--user", "is-enabled", systemdServiceName)
 	output, err := cmd.CombinedOutput()
 	status := strings.TrimSpace(string(output))
-	log.Printf("autostart linux query: command=%q output=%s err=%v", strings.Join(cmd.Args, " "), status, err)
+	autostartLog().Debug("is-enabled query", "command", strings.Join(cmd.Args, " "), "output", status, "err", err)
 	if err != nil && status == "" {
 		return AutoStartStatus{}, err
 	}
@@ -161,7 +160,7 @@ func systemdUnitPath() (string, error) {
 func runSystemctl(args ...string) error {
 	cmd := exec.Command("systemctl", args...)
 	output, err := cmd.CombinedOutput()
-	log.Printf("autostart linux systemctl: command=%q output=%s err=%v", strings.Join(cmd.Args, " "), strings.TrimSpace(string(output)), err)
+	autostartLog().Debug("systemctl", "command", strings.Join(cmd.Args, " "), "output", strings.TrimSpace(string(output)), "err", err)
 	if err != nil {
 		msg := strings.TrimSpace(string(output))
 		if msg == "" {

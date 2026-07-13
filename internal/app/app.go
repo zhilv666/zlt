@@ -3,7 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"zhulingtai/internal/api"
@@ -49,10 +49,10 @@ func RunWithOptions(opts RunOptions) error {
 	}
 
 	if err := runtime.StartScheduler(); err != nil {
-		log.Printf("scheduler start: %v", err)
+		slog.Error("scheduler start failed", "err", err)
 	}
 
-	log.Printf("zlt starting: %s", buildinfo.Summary())
+	slog.Info("zlt starting", "build", buildinfo.Summary())
 
 	if opts.Headless {
 		if err := runtime.StartAutoStartTasks(); err != nil {
@@ -76,7 +76,7 @@ func handleAlreadyRunning(lockPath string, opts RunOptions) error {
 		return fmt.Errorf("驻令台 已在运行 (pid %d)，请勿重复启动", existing.PID)
 	}
 	url := dashboardURL(existing.Addr)
-	log.Printf("zlt already running (pid %d); opening existing dashboard %s", existing.PID, url)
+	slog.Info("already running; opening existing dashboard", "pid", existing.PID, "url", url)
 	openBrowser(url)
 	return nil
 }

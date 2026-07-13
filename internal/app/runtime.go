@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -92,7 +92,7 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 			defer cancel()
 
 			if err := r.HTTP.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Printf("runtime shutdown: http shutdown err=%v, forcing close", err)
+				slog.Warn("http shutdown error, forcing close", "err", err)
 				if closeErr := r.HTTP.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) && r.shutdownErr == nil {
 					r.shutdownErr = closeErr
 				}
@@ -326,12 +326,12 @@ func (r *Runtime) applyAutoStart() error {
 		if !cfg.AutoStart {
 			continue
 		}
-		log.Printf("autostart task: starting %s", cfg.ID)
+		slog.Info("autostart task starting", "task", cfg.ID)
 		if err := r.Manager.Start(cfg.ID); err != nil {
-			log.Printf("autostart task: failed %s err=%v", cfg.ID, err)
+			slog.Error("autostart task failed", "task", cfg.ID, "err", err)
 			return fmt.Errorf("auto-start %s failed: %w", cfg.ID, err)
 		}
-		log.Printf("autostart task: started %s", cfg.ID)
+		slog.Info("autostart task started", "task", cfg.ID)
 	}
 	return nil
 }
@@ -346,13 +346,13 @@ func (r *Runtime) StartAutoStartTasks() error {
 func (r *Runtime) StopAllTasks() error {
 	var firstErr error
 	for _, cfg := range r.ListTasks() {
-		log.Printf("shutdown task: stopping %s", cfg.ID)
+		slog.Info("shutdown task stopping", "task", cfg.ID)
 		if err := r.Manager.Stop(cfg.ID); err != nil && firstErr == nil {
-			log.Printf("shutdown task: failed %s err=%v", cfg.ID, err)
+			slog.Error("shutdown task failed", "task", cfg.ID, "err", err)
 			firstErr = err
 			continue
 		}
-		log.Printf("shutdown task: stopped %s", cfg.ID)
+		slog.Info("shutdown task stopped", "task", cfg.ID)
 	}
 	return firstErr
 }

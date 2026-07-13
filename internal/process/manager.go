@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"zhulingtai/internal/logging"
 	"zhulingtai/internal/task"
 )
 
@@ -43,7 +44,7 @@ type RuntimeState struct {
 type managedProcess struct {
 	task           task.Config
 	cmd            *exec.Cmd
-	logFile        *os.File
+	logFile        *logging.RotatingWriter
 	done           chan struct{}
 	healthStop     chan struct{}
 	state          RuntimeState
@@ -143,10 +144,7 @@ func (m *Manager) ClearLogs(taskID string) error {
 	legacyStderrPath := filepath.Join("data", "logs", taskID, "stderr.log")
 
 	if proc.logFile != nil {
-		if err := proc.logFile.Truncate(0); err != nil {
-			return err
-		}
-		if _, err := proc.logFile.Seek(0, 0); err != nil {
+		if err := proc.logFile.Truncate(); err != nil {
 			return err
 		}
 	} else {
@@ -245,14 +243,10 @@ func (m *Manager) Start(taskID string) error {
 
 	logPath := filepath.Join("data", "logs", proc.task.ID, "app.log")
 
-	if err := rotateLogIfNeeded(logPath); err != nil {
-		proc.state.Status = StatusFailed
-		proc.state.LastError = err.Error()
-		m.mu.Unlock()
-		return err
-	}
-
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	// The rotating writer enforces the size cap on every write, so a long-lived
+	// chatty task can never grow its log without bound. The previous size check
+	// only ran here at start time and was skipped for the entire run.
+	logFile, err := logging.NewRotatingWriter(logPath, maxLogSizeBytes, maxLogBackups)
 	if err != nil {
 		proc.state.Status = StatusFailed
 		proc.state.LastError = err.Error()
@@ -368,7 +362,7 @@ func (m *Manager) stopWithReason(taskID string, reason stopReason, message strin
 	return nil
 }
 
-func (m *Manager) wait(taskID string, cmd *exec.Cmd, logFile *os.File, done chan struct{}) {
+func (m *Manager) wait(taskID string, cmd *exec.Cmd, logFile *logging.RotatingWriter, done chan struct{}) {
 	err := cmd.Wait()
 	close(done)
 
@@ -582,32 +576,4 @@ func resolveProgramPath(program string, workdir string) string {
 
 func isRunningStatus(status string) bool {
 	return status == StatusRunning || status == StatusStarting || status == StatusStopping
-}
-
-func rotateLogIfNeeded(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	if info.Size() < maxLogSizeBytes {
-		return nil
-	}
-
-	oldest := fmt.Sprintf("%s.%d", path, maxLogBackups)
-	if err := os.Remove(oldest); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-
-	for i := maxLogBackups - 1; i >= 1; i-- {
-		src := fmt.Sprintf("%s.%d", path, i)
-		dst := fmt.Sprintf("%s.%d", path, i+1)
-		if err := os.Rename(src, dst); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-
-	return os.Rename(path, path+".1")
 }

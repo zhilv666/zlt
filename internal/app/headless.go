@@ -2,14 +2,14 @@ package app
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 )
 
 func runHeadless(rt *Runtime) error {
-	log.Printf("dashboard available at %s", rt.Address())
+	slog.Info("dashboard available", "addr", rt.Address())
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)

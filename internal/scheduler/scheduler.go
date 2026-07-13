@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -116,7 +117,7 @@ func (s *Scheduler) Stop(timeout time.Duration) {
 	select {
 	case <-ctx.Done():
 	case <-time.After(timeout):
-		log.Printf("scheduler stop: timed out after %s waiting for running jobs", timeout)
+		slog.Warn("scheduler stop: timed out waiting for running jobs", "timeout", timeout)
 	}
 }
 
@@ -141,7 +142,7 @@ func (s *Scheduler) Reload(schedules []task.Schedule) {
 		})
 		if err != nil {
 			// Validation happens before persistence, so this is defensive.
-			log.Printf("schedule %s: failed to register cron entry: %v", sch.ID, err)
+			slog.Error("schedule: failed to register cron entry", "schedule", sch.ID, "err", err)
 			continue
 		}
 		s.entries[sch.ID] = entryID
@@ -185,17 +186,10 @@ func (s *Scheduler) run(sch task.Schedule) task.ScheduleRunResult {
 }
 
 func (s *Scheduler) report(scheduleID string, result task.ScheduleRunResult) {
-	log.Printf("schedule %s: %s%s", scheduleID, result.Status, formatDetail(result.Detail))
+	slog.Info("schedule run", "schedule", scheduleID, "status", result.Status, "detail", result.Detail)
 	if s.onResult != nil {
 		s.onResult(scheduleID, time.Now(), result.Status, result.Detail)
 	}
-}
-
-func formatDetail(detail string) string {
-	if detail == "" {
-		return ""
-	}
-	return " (" + detail + ")"
 }
 
 // execute maps the action onto the current task state.

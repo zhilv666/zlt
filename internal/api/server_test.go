@@ -31,12 +31,12 @@ func TestReadLogTailReturnsLastNLines(t *testing.T) {
 		t.Fatalf("write log: %v", err)
 	}
 
+	// A trailing newline must not cost a line: tail=2 of a 4-line file is "3","4".
 	content, err := readLogTail(path, 2)
 	if err != nil {
 		t.Fatalf("read log tail: %v", err)
 	}
-	trimmed := strings.TrimSpace(content)
-	if trimmed != "4" {
+	if strings.TrimSpace(content) != "3\n4" {
 		t.Fatalf("unexpected log tail %q", content)
 	}
 }

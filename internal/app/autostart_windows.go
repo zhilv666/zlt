@@ -5,7 +5,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
@@ -22,13 +21,13 @@ func windowsRunKeyDisplay() string {
 func enableAutostart() error {
 	exe, err := os.Executable()
 	if err != nil {
-		log.Printf("autostart windows enable: resolve executable failed: %v", err)
+		autostartLog().Error("enable: resolve executable failed", "err", err)
 		return err
 	}
 
 	workdir, err := os.Getwd()
 	if err != nil {
-		log.Printf("autostart windows enable: getwd failed: %v", err)
+		autostartLog().Error("enable: getwd failed", "err", err)
 		return err
 	}
 
@@ -39,16 +38,16 @@ func enableAutostart() error {
 
 	key, err := registry.OpenKey(registry.CURRENT_USER, windowsRunKeyPath, registry.SET_VALUE)
 	if err != nil {
-		log.Printf("autostart windows enable: open key failed: %v", err)
+		autostartLog().Error("enable: open registry key failed", "err", err)
 		return err
 	}
 	defer key.Close()
 
 	if err := key.SetStringValue(windowsAutostartValue, command); err != nil {
-		log.Printf("autostart windows enable: set value failed: %v", err)
+		autostartLog().Error("enable: set registry value failed", "err", err)
 		return err
 	}
-	log.Printf("autostart windows enable: set %s=%q", windowsAutostartValue, command)
+	autostartLog().Info("enabled", "value", windowsAutostartValue, "command", command)
 	return nil
 }
 
@@ -58,7 +57,7 @@ func disableAutostart() error {
 		if errors.Is(err, registry.ErrNotExist) {
 			return nil
 		}
-		log.Printf("autostart windows disable: open key failed: %v", err)
+		autostartLog().Error("disable: open registry key failed", "err", err)
 		return err
 	}
 	defer key.Close()
@@ -67,20 +66,20 @@ func disableAutostart() error {
 		if errors.Is(err, registry.ErrNotExist) {
 			return nil
 		}
-		log.Printf("autostart windows disable: delete value failed: %v", err)
+		autostartLog().Error("disable: delete registry value failed", "err", err)
 		return err
 	}
-	log.Printf("autostart windows disable: deleted %s", windowsAutostartValue)
+	autostartLog().Info("disabled", "value", windowsAutostartValue)
 	return nil
 }
 
 func statusAutostart() error {
 	status, err := getAutoStartStatus()
 	if err != nil {
-		log.Printf("autostart windows status: err=%v", err)
+		autostartLog().Error("status query failed", "err", err)
 		return err
 	}
-	log.Printf("autostart windows status: status=%s enabled=%v unit=%s", status.Status, status.Enabled, status.UnitPath)
+	autostartLog().Debug("status", "status", status.Status, "enabled", status.Enabled, "unit", status.UnitPath)
 	fmt.Printf("autostart: %s\n", status.Status)
 	return nil
 }
@@ -93,7 +92,7 @@ func getAutoStartStatus() (AutoStartStatus, error) {
 		if errors.Is(err, registry.ErrNotExist) {
 			return AutoStartStatus{Supported: true, Enabled: false, Status: "disabled", UnitPath: unitPath}, nil
 		}
-		log.Printf("autostart windows status: open key failed: %v", err)
+		autostartLog().Error("status: open registry key failed", "err", err)
 		return AutoStartStatus{}, err
 	}
 	defer key.Close()
@@ -102,7 +101,7 @@ func getAutoStartStatus() (AutoStartStatus, error) {
 		if errors.Is(err, registry.ErrNotExist) {
 			return AutoStartStatus{Supported: true, Enabled: false, Status: "disabled", UnitPath: unitPath}, nil
 		}
-		log.Printf("autostart windows status: get value failed: %v", err)
+		autostartLog().Error("status: read registry value failed", "err", err)
 		return AutoStartStatus{}, err
 	}
 
