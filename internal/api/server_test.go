@@ -14,6 +14,57 @@ import (
 	"zhulingtai/internal/task"
 )
 
+type testSettings struct {
+	current task.Settings
+	saved   *task.Settings
+}
+
+func (t *testSettings) Settings() (task.Settings, error) { return t.current, nil }
+
+func (t *testSettings) UpdateSettings(s task.Settings) (task.Settings, error) {
+	t.saved = &s
+	return s, nil
+}
+
+func TestHandleSettingsGet(t *testing.T) {
+	st := &testSettings{current: task.DefaultSettings()}
+	server := NewServer(testRuntime{}, testManager{}, nil, nil, st)
+
+	rec := httptest.NewRecorder()
+	server.handleSettings(rec, httptest.NewRequest(http.MethodGet, "/api/settings", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok || data["log_level"] != "info" {
+		t.Fatalf("unexpected data: %#v", resp.Data)
+	}
+}
+
+func TestHandleSettingsPut(t *testing.T) {
+	st := &testSettings{current: task.DefaultSettings()}
+	server := NewServer(testRuntime{}, testManager{}, nil, nil, st)
+
+	body := `{"log_level":"warn","app_log_max_size_mb":20,"app_log_max_backups":5,"task_log_max_size_mb":30,"task_log_max_backups":2}`
+	rec := httptest.NewRecorder()
+	server.handleSettings(rec, httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(body)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if st.saved == nil {
+		t.Fatal("UpdateSettings was not called")
+	}
+	if st.saved.LogLevel != "warn" || st.saved.TaskLogMaxSizeMB != 30 {
+		t.Fatalf("unexpected saved settings: %+v", *st.saved)
+	}
+}
+
 func TestReadLogTailReturnsMissingAsEmpty(t *testing.T) {
 	content, err := readLogTail(filepath.Join(t.TempDir(), "missing.log"), 10)
 	if err != nil {
@@ -31,12 +82,12 @@ func TestReadLogTailReturnsLastNLines(t *testing.T) {
 		t.Fatalf("write log: %v", err)
 	}
 
+	// A trailing newline must not cost a line: tail=2 of a 4-line file is "3","4".
 	content, err := readLogTail(path, 2)
 	if err != nil {
 		t.Fatalf("read log tail: %v", err)
 	}
-	trimmed := strings.TrimSpace(content)
-	if trimmed != "4" {
+	if strings.TrimSpace(content) != "3\n4" {
 		t.Fatalf("unexpected log tail %q", content)
 	}
 }
@@ -122,6 +173,7 @@ func TestBuildTaskItemsMatchesStates(t *testing.T) {
 		},
 		nil,
 		nil,
+		nil,
 	)
 
 	items := server.buildTaskItems()
@@ -141,6 +193,7 @@ func TestHandleTaskEventsStreamsInitialSnapshot(t *testing.T) {
 		testManager{
 			states: []process.RuntimeState{{TaskID: "demo", Status: process.StatusStopped}},
 		},
+		nil,
 		nil,
 		nil,
 	).Handler())
@@ -179,7 +232,7 @@ func TestHandleTaskEventsStreamsInitialSnapshot(t *testing.T) {
 }
 
 func TestHandleAutoStartMethodGuard(t *testing.T) {
-	server := NewServer(testRuntime{}, testManager{}, nil, nil)
+	server := NewServer(testRuntime{}, testManager{}, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/autostart", nil)
 	rec := httptest.NewRecorder()
 
@@ -193,7 +246,7 @@ func TestHandleAutoStartMethodGuard(t *testing.T) {
 func TestHandleAutoStartStatus(t *testing.T) {
 	server := NewServer(testRuntime{}, testManager{}, testAutoStart{
 		status: AutoStartStatus{Supported: true, Enabled: true, Status: "enabled"},
-	}, nil)
+	}, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/autostart", nil)
 	rec := httptest.NewRecorder()
 
@@ -216,7 +269,7 @@ func TestHandleAutoStartStatus(t *testing.T) {
 }
 
 func TestHandleAutoStartDisabledFallback(t *testing.T) {
-	server := NewServer(testRuntime{}, testManager{}, nil, nil)
+	server := NewServer(testRuntime{}, testManager{}, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/autostart", nil)
 	rec := httptest.NewRecorder()
 

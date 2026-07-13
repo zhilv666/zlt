@@ -4,7 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -152,7 +152,7 @@ func (r *Runtime) recordScheduleResult(scheduleID string, at time.Time, status s
 	r.Schedules[i].LastDetail = detail
 
 	if err := r.TaskStore.SaveSchedules(r.Schedules); err != nil {
-		log.Printf("schedule %s: failed to persist run result: %v", scheduleID, err)
+		slog.Error("schedule: failed to persist run result", "schedule", scheduleID, "err", err)
 	}
 }
 
@@ -169,7 +169,7 @@ func (r *Runtime) disableOrphanSchedulesLocked() error {
 		r.Schedules[i].LastDetail = "task not found: " + r.Schedules[i].TaskID + " (schedule disabled)"
 		r.Schedules[i].UpdatedAt = now
 		changed = true
-		log.Printf("schedule %s: task %s missing, disabled", r.Schedules[i].ID, r.Schedules[i].TaskID)
+		slog.Warn("schedule disabled: task missing", "schedule", r.Schedules[i].ID, "task", r.Schedules[i].TaskID)
 	}
 	if !changed {
 		return nil

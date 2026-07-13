@@ -45,6 +45,11 @@ func NewTaskStore(dbPath string, jsonPath string) (*TaskStore, error) {
 		return nil, err
 	}
 
+	if err := store.initSettingsSchema(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	if err := store.bootstrapFromJSONIfNeeded(); err != nil {
 		_ = db.Close()
 		return nil, err

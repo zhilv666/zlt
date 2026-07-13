@@ -4,7 +4,7 @@ package app
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -59,7 +59,7 @@ func (c *trayController) onReady() {
 
 	go func() {
 		if err := c.rt.StartAutoStartTasks(); err != nil {
-			log.Printf("zlt autostart failed: %v", err)
+			slog.Error("autostart tasks failed", "err", err)
 		}
 		c.syncTaskMenus()
 	}()
@@ -77,9 +77,9 @@ func (c *trayController) onReady() {
 			case <-quitItem.ClickedCh:
 				quitItem.Disable()
 				quitItem.SetTitle("退出中...")
-				log.Printf("zlt quit: stopping tasks before exit")
+				slog.Info("quit: stopping tasks before exit")
 				_ = c.rt.Shutdown(context.Background())
-				log.Printf("zlt quit: shutdown complete, quitting systray")
+				slog.Info("quit: shutdown complete, quitting systray")
 				systray.Quit()
 				return
 			}

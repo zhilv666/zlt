@@ -14,6 +14,7 @@ import (
 
 	rootassets "zhulingtai"
 	"zhulingtai/internal/buildinfo"
+	"zhulingtai/internal/logging"
 	"zhulingtai/internal/process"
 	"zhulingtai/internal/task"
 )
@@ -40,12 +41,19 @@ type Server struct {
 	manager   ProcessManager
 	autostart AutoStartManager
 	schedules ScheduleManager
+	settings  SettingsManager
 }
 
 type AutoStartManager interface {
 	Status() (AutoStartStatus, error)
 	Enable() error
 	Disable() error
+}
+
+// SettingsManager reads and writes the persisted application settings.
+type SettingsManager interface {
+	Settings() (task.Settings, error)
+	UpdateSettings(task.Settings) (task.Settings, error)
 }
 
 type AutoStartStatus struct {
@@ -67,12 +75,13 @@ type taskItem struct {
 	Status process.RuntimeState `json:"status"`
 }
 
-func NewServer(runtime Runtime, manager ProcessManager, autostart AutoStartManager, schedules ScheduleManager) *Server {
+func NewServer(runtime Runtime, manager ProcessManager, autostart AutoStartManager, schedules ScheduleManager, settings SettingsManager) *Server {
 	return &Server{
 		runtime:   runtime,
 		manager:   manager,
 		autostart: autostart,
 		schedules: schedules,
+		settings:  settings,
 	}
 }
 
@@ -80,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/build-info", s.handleBuildInfo)
+	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/system-log", s.handleSystemLog)
 	mux.HandleFunc("/api/system-log-stream", s.handleSystemLogStream)
 	mux.HandleFunc("/api/system-log-download", s.handleSystemLogDownload)
@@ -117,6 +127,37 @@ func (s *Server) handleBuildInfo(w http.ResponseWriter, r *http.Request) {
 		Msg:  "ok",
 		Data: buildinfo.Current(),
 	})
+}
+
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if s.settings == nil {
+		writeJSON(w, http.StatusOK, response{Code: 1, Msg: "settings unavailable"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		current, err := s.settings.Settings()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, response{Code: 1, Msg: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, response{Code: 0, Msg: "ok", Data: current})
+	case http.MethodPut, http.MethodPost:
+		var payload task.Settings
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: "invalid json"})
+			return
+		}
+		saved, err := s.settings.UpdateSettings(payload)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, response{Code: 0, Msg: "saved", Data: saved})
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+	}
 }
 
 func (s *Server) handleSystemLog(w http.ResponseWriter, r *http.Request) {
@@ -477,35 +518,50 @@ func (s *Server) handleGenericLogStream(w http.ResponseWriter, r *http.Request, 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	var lastPayload []byte
+	// Track the log file size so we only re-read/decode/marshal when it actually
+	// grew (or was rotated/cleared). Previously every tick re-read the whole tail
+	// for every connected client, even when nothing had changed.
+	logPath := path
+	if logPath == "" {
+		logPath = taskLogPath(sourceID)
+	}
+
+	var (
+		lastPayload []byte
+		lastSize    int64 = -1
+	)
 	for {
-		var (
-			content string
-			err     error
-		)
-		if path != "" {
-			content, err = readLogTail(path, tail)
-		} else {
-			content, err = readTaskLogTail(sourceID, tail)
-		}
-		if err != nil {
-			return
-		}
+		if size := logging.FileSize(logPath); size != lastSize {
+			lastSize = size
 
-		payload, err := json.Marshal(map[string]string{
-			"task_id": sourceID,
-			"content": content,
-		})
-		if err != nil {
-			return
-		}
-
-		if !bytes.Equal(payload, lastPayload) {
-			if err := writeSSEEvent(w, "logs", payload); err != nil {
+			var (
+				content string
+				err     error
+			)
+			if path != "" {
+				content, err = readLogTail(path, tail)
+			} else {
+				content, err = readTaskLogTail(sourceID, tail)
+			}
+			if err != nil {
 				return
 			}
-			flusher.Flush()
-			lastPayload = payload
+
+			payload, err := json.Marshal(map[string]string{
+				"task_id": sourceID,
+				"content": content,
+			})
+			if err != nil {
+				return
+			}
+
+			if !bytes.Equal(payload, lastPayload) {
+				if err := writeSSEEvent(w, "logs", payload); err != nil {
+					return
+				}
+				flusher.Flush()
+				lastPayload = payload
+			}
 		}
 
 		select {
@@ -535,19 +591,30 @@ func (s *Server) buildTaskItems() []taskItem {
 }
 
 func readLogTail(path string, tail int) (string, error) {
-	data, err := os.ReadFile(path)
+	raw, err := logging.TailLines(path, tail, tailBudget(tail))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
 		return "", err
 	}
+	return decodeLogText(raw), nil
+}
 
-	lines := strings.Split(decodeLogText(data), "\n")
-	if len(lines) > tail {
-		lines = lines[len(lines)-tail:]
+// tailBudget bounds how many bytes TailLines reads from the end of a log so a
+// huge file never gets pulled fully into memory. It scales with the requested
+// line count but is clamped to a sane window.
+func tailBudget(tail int) int64 {
+	const (
+		perLine = 2048
+		minCap  = 64 * 1024
+		maxCap  = 4 * 1024 * 1024
+	)
+	budget := int64(tail) * perLine
+	if budget < minCap {
+		budget = minCap
 	}
-	return strings.Join(lines, "\n"), nil
+	if budget > maxCap {
+		budget = maxCap
+	}
+	return budget
 }
 
 func taskLogPath(taskID string) string {
@@ -600,12 +667,20 @@ func readTaskLog(taskID string) (string, error) {
 }
 
 func readTaskLogTail(taskID string, tail int) (string, error) {
-	content, err := readTaskLog(taskID)
-	if err != nil {
-		return "", err
+	path := taskLogPath(taskID)
+	if _, err := os.Stat(path); err == nil {
+		raw, err := logging.TailLines(path, tail, tailBudget(tail))
+		if err != nil {
+			return "", err
+		}
+		return decodeLogText(raw), nil
 	}
-	if content == "" {
-		return "", nil
+
+	// Legacy tasks (pre-combined-log) only have stdout.log/stderr.log; those are
+	// static and small, so merging the whole thing then tailing is fine.
+	content, err := readTaskLog(taskID)
+	if err != nil || content == "" {
+		return content, err
 	}
 
 	lines := strings.Split(content, "\n")

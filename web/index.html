@@ -1396,6 +1396,66 @@
           </div>
         </div>
       </div>
+
+      <div class="card system-card">
+        <div class="card-body">
+          <div class="system-row">
+            <div class="system-head">
+              <div class="system-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+              </div>
+              <div>
+                <div class="card-title" style="font-size:1.02rem;">日志设置</div>
+                <div class="system-meta">调整日志级别与轮转策略，保存后立即生效</div>
+              </div>
+            </div>
+            <div class="actions-group">
+              <button class="btn btn-sm" id="log-settings-refresh">刷新</button>
+              <button class="btn btn-sm btn-primary" id="log-settings-save">保存</button>
+            </div>
+          </div>
+
+          <div class="form-section" style="margin-top:18px;">
+            <div class="form-group" style="max-width:240px;">
+              <label class="form-label" for="set-log-level">日志级别</label>
+              <select id="set-log-level" class="form-control">
+                <option value="debug">debug（最详细）</option>
+                <option value="info">info（默认）</option>
+                <option value="warn">warn</option>
+                <option value="error">error（最少）</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-title">应用日志 (data/app.log)</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label" for="set-applog-size">单文件上限 (MB)</label>
+                <input id="set-applog-size" class="form-control" type="number" min="1" max="1024" placeholder="默认 10">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="set-applog-backups">保留份数</label>
+                <input id="set-applog-backups" class="form-control" type="number" min="0" max="100" placeholder="默认 3">
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-title">任务日志 (每个任务的输出)</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label" for="set-tasklog-size">单文件上限 (MB)</label>
+                <input id="set-tasklog-size" class="form-control" type="number" min="1" max="1024" placeholder="默认 10">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="set-tasklog-backups">保留份数</label>
+                <input id="set-tasklog-backups" class="form-control" type="number" min="0" max="100" placeholder="默认 3">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1945,6 +2005,55 @@
       renderAutoStartStatus(data.data || null);
     }
 
+    // Log settings (level + rotation) — see the 设置 tab.
+    function fillLogSettings(s) {
+      if (!s) return;
+      document.getElementById('set-log-level').value = s.log_level || 'info';
+      document.getElementById('set-applog-size').value = s.app_log_max_size_mb;
+      document.getElementById('set-applog-backups').value = s.app_log_max_backups;
+      document.getElementById('set-tasklog-size').value = s.task_log_max_size_mb;
+      document.getElementById('set-tasklog-backups').value = s.task_log_max_backups;
+    }
+
+    async function loadLogSettings() {
+      const data = await api('/api/settings');
+      if (data && data.code === 0 && data.data) {
+        fillLogSettings(data.data);
+      }
+    }
+
+    async function saveLogSettings() {
+      const payload = {
+        log_level: document.getElementById('set-log-level').value,
+        app_log_max_size_mb: parseInt(document.getElementById('set-applog-size').value, 10) || 0,
+        app_log_max_backups: parseInt(document.getElementById('set-applog-backups').value, 10) || 0,
+        task_log_max_size_mb: parseInt(document.getElementById('set-tasklog-size').value, 10) || 0,
+        task_log_max_backups: parseInt(document.getElementById('set-tasklog-backups').value, 10) || 0,
+      };
+
+      const btn = document.getElementById('log-settings-save');
+      const original = btn.textContent;
+      btn.textContent = '保存中...';
+      btn.disabled = true;
+
+      const data = await api('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      btn.textContent = original;
+      btn.disabled = false;
+
+      if (!data || data.code !== 0) {
+        showToast('保存失败', { type: 'error', detail: (data && data.msg) || '' });
+        return;
+      }
+      // The server clamps out-of-range numbers; re-populate from the response.
+      fillLogSettings(data.data);
+      showToast('日志设置已保存并生效', { type: 'success' });
+    }
+
     // Tabs Control
     function switchTab(tabId) {
       document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -1969,6 +2078,7 @@
 
       if (tabId === 'settings') {
         loadAutoStartStatus();
+        loadLogSettings();
       }
     }
 
@@ -2756,6 +2866,8 @@
       const enabled = currentAutoStartStatus && currentAutoStartStatus.enabled;
       updateAutoStart(enabled ? 'disable' : 'enable');
     });
+    document.getElementById('log-settings-refresh').addEventListener('click', loadLogSettings);
+    document.getElementById('log-settings-save').addEventListener('click', saveLogSettings);
     document.querySelectorAll('.cron-preset').forEach((btn) => {
       btn.addEventListener('click', () => {
         document.getElementById('schedule-cron').value = btn.dataset.cron;

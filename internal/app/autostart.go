@@ -3,7 +3,14 @@ package app
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 )
+
+// autostartLog is the shared component-scoped logger for the platform-specific
+// autostart implementations, so their entries are easy to filter in app.log.
+func autostartLog() *slog.Logger {
+	return slog.Default().With("component", "autostart")
+}
 
 type AutoStartStatus struct {
 	Supported bool   `json:"supported"`

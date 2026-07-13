@@ -61,6 +61,7 @@ func newScheduleTestServer(m *testScheduleManager) *Server {
 		testManager{},
 		nil,
 		m,
+		nil,
 	)
 }
 
@@ -222,7 +223,7 @@ func TestHandleScheduleMethodGuards(t *testing.T) {
 }
 
 func TestHandleSchedulesUnavailableWithoutManager(t *testing.T) {
-	server := NewServer(testRuntime{}, testManager{}, nil, nil)
+	server := NewServer(testRuntime{}, testManager{}, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/schedules", nil)
 	rec := httptest.NewRecorder()
