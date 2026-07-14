@@ -1317,6 +1317,13 @@
             </div>
             <div class="logs-toolbar-controls">
               <div class="log-field">
+                <span class="log-field-label">范围</span>
+                <select id="log-scope" class="form-control form-select">
+                  <option value="current">本次运行</option>
+                  <option value="all">全部历史</option>
+                </select>
+              </div>
+              <div class="log-field">
                 <span class="log-field-label">渲染</span>
                 <select id="log-render-mode" class="form-control form-select">
                   <option value="ansi">彩色渲染</option>
@@ -1652,6 +1659,8 @@
     let currentTaskSearch = '';
     let currentAutoStartStatus = null;
     let currentLogRenderMode = localStorage.getItem('log-render-mode') || 'ansi';
+    // 'current' = 本次运行 (live stream); 'all' = 全部历史 (static, no stream).
+    let currentLogScope = 'current';
     let currentSchedules = [];
     let editingScheduleId = '';
     let schedulesTimer = null;
@@ -2429,9 +2438,15 @@
       }
 
       const nearBottom = logsEl.scrollTop + logsEl.clientHeight >= logsEl.scrollHeight - 40;
-      const url = taskId === SYSTEM_LOG_ID
-        ? '/api/system-log?tail=400'
-        : '/api/tasks/' + encodeURIComponent(taskId) + '/logs?tail=400';
+      const historyScope = currentLogScope === 'all' && taskId !== SYSTEM_LOG_ID;
+      let url;
+      if (taskId === SYSTEM_LOG_ID) {
+        url = '/api/system-log?tail=400';
+      } else if (historyScope) {
+        url = '/api/tasks/' + encodeURIComponent(taskId) + '/logs?scope=all&tail=2000';
+      } else {
+        url = '/api/tasks/' + encodeURIComponent(taskId) + '/logs?tail=400';
+      }
       const data = await api(url);
 
       if (data && data.code === 0) {
@@ -2490,6 +2505,13 @@
 
       const taskId = document.getElementById('log-task').value;
       if (!taskId) {
+        disconnectLogStream();
+        return;
+      }
+
+      // History view (全部历史) is static — the archived runs never change, so we
+      // read it once instead of streaming.
+      if (currentLogScope === 'all' && taskId !== SYSTEM_LOG_ID) {
         disconnectLogStream();
         return;
       }
@@ -2585,9 +2607,10 @@
         alert('请选择一个任务');
         return;
       }
+      const historyScope = currentLogScope === 'all' && taskId !== SYSTEM_LOG_ID;
       window.location.href = taskId === SYSTEM_LOG_ID
         ? '/api/system-log-download'
-        : '/api/tasks/' + encodeURIComponent(taskId) + '/download-logs';
+        : '/api/tasks/' + encodeURIComponent(taskId) + '/download-logs' + (historyScope ? '?scope=all' : '');
     }
 
     async function loadVersion() {
@@ -2891,6 +2914,11 @@
       connectLogStream();
     });
     document.getElementById('log-task').addEventListener('change', () => {
+      loadLogs();
+      connectLogStream();
+    });
+    document.getElementById('log-scope').addEventListener('change', (event) => {
+      currentLogScope = event.target.value === 'all' ? 'all' : 'current';
       loadLogs();
       connectLogStream();
     });

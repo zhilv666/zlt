@@ -168,22 +168,19 @@ func (m *Manager) ClearLogs(taskID string) error {
 	legacyStdoutPath := filepath.Join("data", "logs", taskID, "stdout.log")
 	legacyStderrPath := filepath.Join("data", "logs", taskID, "stderr.log")
 
+	// Clear everything for this task: the current run plus all archived runs. The
+	// "start clean each run" need is already met by archiving on start, so this
+	// button's job is a full reset (and reclaiming disk).
 	if proc.logFile != nil {
-		if err := proc.logFile.Truncate(); err != nil {
+		if err := proc.logFile.Purge(); err != nil {
 			return err
 		}
-	} else {
-		if err := os.WriteFile(logPath, []byte{}, 0o644); err != nil {
-			return err
-		}
+	} else if err := logging.PurgeLog(logPath); err != nil {
+		return err
 	}
 
-	if err := os.WriteFile(legacyStdoutPath, []byte{}, 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(legacyStderrPath, []byte{}, 0o644); err != nil {
-		return err
-	}
+	_ = os.Remove(legacyStdoutPath)
+	_ = os.Remove(legacyStderrPath)
 
 	return nil
 }
@@ -224,6 +221,14 @@ func (m *Manager) RemoveTask(taskID string) error {
 }
 
 func (m *Manager) Start(taskID string) error {
+	return m.start(taskID, true)
+}
+
+// start launches a task. freshRun archives the previous run's log so the viewer
+// opens clean; it is true for every deliberate start (manual, restart, schedule,
+// autostart) and false only for a crash-triggered auto-restart, which keeps
+// appending so the crash and its retry stay in one place.
+func (m *Manager) start(taskID string, freshRun bool) error {
 	m.mu.Lock()
 	proc, ok := m.procs[taskID]
 	if !ok {
@@ -278,6 +283,21 @@ func (m *Manager) Start(taskID string) error {
 		m.mu.Unlock()
 		return err
 	}
+
+	// A fresh run archives the previous run's output (current app.log → app.log.1,
+	// bounded by the configured backup count) so the viewer starts clean. A crash
+	// auto-restart skips this and appends instead. Either way we stamp a banner so
+	// run boundaries are visible even inside the archived history.
+	if freshRun {
+		if err := logFile.Rotate(); err != nil {
+			_ = logFile.Close()
+			proc.state.Status = StatusFailed
+			proc.state.LastError = err.Error()
+			m.mu.Unlock()
+			return err
+		}
+	}
+	fmt.Fprintf(logFile, "==== %s %s ====\n", runBannerLabel(freshRun), time.Now().Format("2006-01-02 15:04:05"))
 
 	resolvedProgram := resolveProgramPath(proc.task.Program, workdir)
 	cmd := exec.Command(resolvedProgram, proc.task.Args...)
@@ -578,7 +598,15 @@ func (m *Manager) prepareRestartLocked(proc *managedProcess) (string, int, bool)
 
 func (m *Manager) scheduleRestart(taskID string, delaySec int) {
 	time.Sleep(time.Duration(delaySec) * time.Second)
-	_ = m.Start(taskID)
+	_ = m.start(taskID, false)
+}
+
+// runBannerLabel picks the banner wording written at the top of each run.
+func runBannerLabel(freshRun bool) string {
+	if freshRun {
+		return "运行开始"
+	}
+	return "自动重启"
 }
 
 func resolveProgramPath(program string, workdir string) string {
