@@ -2,6 +2,20 @@
 
 本文件集中记录驻令台各版本的重要变化。后续正式版本发布时，GitHub Actions 会自动将新版本内容插入到文件顶部。
 
+## v0.2.7 (2026-07-15)
+
+### Features
+
+- ✨ feat(log): 任务日志按运行归档，支持查看历史 (87b3a2d)
+- ✨ feat(web): 日志查看支持一键复制 (94ebba5)
+- ✨ feat(settings): 网页可配置日志设置项 (2887fd9)
+- ✨ feat(log): 结构化日志、轮转与高效读取 (b86de69)
+- ✨ feat(app): 实现应用单实例运行 (028f1a9)
+
+### Documentation
+
+- 📝 docs(changelog): 更新 v0.2.6 变更日志 [skip ci] (8b36902)
+
 ## v0.2.6 (2026-07-12)
 
 ### Features
