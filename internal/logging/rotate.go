@@ -161,3 +161,39 @@ func (w *RotatingWriter) Close() error {
 	w.file = nil
 	return err
 }
+
+// Purge empties the current file and deletes every rotated backup, then reopens
+// a fresh empty current file. Used to fully reset a log ("clear all").
+func (w *RotatingWriter) Purge() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file != nil {
+		if err := w.file.Close(); err != nil {
+			return err
+		}
+		w.file = nil
+	}
+	if err := PurgeLog(w.path); err != nil {
+		return err
+	}
+	return w.openLocked()
+}
+
+// PurgeLog empties the log at path and removes all of its rotated backups
+// (path.1, path.2, ...). It works whether or not a writer is currently open, so
+// callers can clear a stopped task's logs too.
+func PurgeLog(path string) error {
+	if err := os.Truncate(path, 0); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	matches, err := filepath.Glob(path + ".*")
+	if err != nil {
+		return err
+	}
+	for _, backup := range matches {
+		if err := os.Remove(backup); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -451,7 +452,15 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 			tail = 2000
 		}
 
-		data, err := readTaskLogTail(taskID, tail)
+		var (
+			data string
+			err  error
+		)
+		if r.URL.Query().Get("scope") == "all" {
+			data, err = readTaskLogAllTail(taskID, tail)
+		} else {
+			data, err = readTaskLogTail(taskID, tail)
+		}
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
 			return
@@ -468,7 +477,15 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
 			return
 		}
-		data, err := readTaskLog(taskID)
+		var (
+			data string
+			err  error
+		)
+		if r.URL.Query().Get("scope") == "all" {
+			data, err = readTaskLogAll(taskID)
+		} else {
+			data, err = readTaskLog(taskID)
+		}
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
 			return
@@ -688,6 +705,103 @@ func readTaskLogTail(taskID string, tail int) (string, error) {
 		lines = lines[len(lines)-tail:]
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+// taskLogArchivesNewestFirst returns the rotated backups of a task log ordered
+// newest-first: app.log.1 (most recent archive) .. app.log.N (oldest).
+func taskLogArchivesNewestFirst(taskID string) []string {
+	matches, _ := filepath.Glob(taskLogPath(taskID) + ".*")
+	type archive struct {
+		n    int
+		path string
+	}
+	archives := make([]archive, 0, len(matches))
+	for _, p := range matches {
+		n, err := strconv.Atoi(strings.TrimPrefix(filepath.Ext(p), "."))
+		if err != nil || n <= 0 {
+			continue
+		}
+		archives = append(archives, archive{n: n, path: p})
+	}
+	sort.Slice(archives, func(i, j int) bool { return archives[i].n < archives[j].n })
+
+	paths := make([]string, len(archives))
+	for i, a := range archives {
+		paths[i] = a.path
+	}
+	return paths
+}
+
+// readTaskLogAllTail returns the last `tail` lines across the current run and all
+// archived runs (oldest → newest). It walks segments newest-first and stops once
+// enough lines are gathered, so it never reads ancient archives it does not need.
+func readTaskLogAllTail(taskID string, tail int) (string, error) {
+	segments := append([]string{taskLogPath(taskID)}, taskLogArchivesNewestFirst(taskID)...)
+
+	var chunks [][]byte // newest-first
+	remaining := tail
+	for _, seg := range segments {
+		if remaining <= 0 {
+			break
+		}
+		raw, err := logging.TailLines(seg, remaining, tailBudget(remaining))
+		if err != nil {
+			return "", err
+		}
+		if len(raw) == 0 {
+			continue
+		}
+		chunks = append(chunks, raw)
+		remaining -= bytes.Count(raw, []byte("\n")) + 1
+	}
+
+	if len(chunks) == 0 {
+		return readTaskLogTail(taskID, tail) // legacy fallback
+	}
+
+	var buf []byte
+	for i := len(chunks) - 1; i >= 0; i-- { // reverse to oldest → newest
+		if len(buf) > 0 {
+			buf = append(buf, '\n')
+		}
+		buf = append(buf, chunks[i]...)
+	}
+	return decodeLogText(buf), nil
+}
+
+// readTaskLogAll returns the full current + archived log for a task
+// (oldest → newest), used by the download endpoint.
+func readTaskLogAll(taskID string) (string, error) {
+	archives := taskLogArchivesNewestFirst(taskID)
+
+	var buf []byte
+	appendData := func(data []byte) {
+		if len(buf) > 0 && !bytes.HasSuffix(buf, []byte("\n")) {
+			buf = append(buf, '\n')
+		}
+		buf = append(buf, data...)
+	}
+
+	for i := len(archives) - 1; i >= 0; i-- { // oldest archive (.N) first
+		data, err := os.ReadFile(archives[i])
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", err
+		}
+		appendData(data)
+	}
+	if data, err := os.ReadFile(taskLogPath(taskID)); err == nil {
+		appendData(data)
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	if len(buf) == 0 {
+		return readTaskLog(taskID) // legacy fallback
+	}
+	return decodeLogText(buf), nil
 }
 
 func writeSSEEvent(w http.ResponseWriter, event string, payload []byte) error {

@@ -1317,6 +1317,13 @@
             </div>
             <div class="logs-toolbar-controls">
               <div class="log-field">
+                <span class="log-field-label">范围</span>
+                <select id="log-scope" class="form-control form-select">
+                  <option value="current">本次运行</option>
+                  <option value="all">全部历史</option>
+                </select>
+              </div>
+              <div class="log-field">
                 <span class="log-field-label">渲染</span>
                 <select id="log-render-mode" class="form-control form-select">
                   <option value="ansi">彩色渲染</option>
@@ -1334,6 +1341,7 @@
             </div>
             <div class="logs-toolbar-actions">
               <button class="btn btn-sm" onclick="loadLogs()">读取</button>
+              <button class="btn btn-sm" onclick="copyLogs()">复制</button>
               <button class="btn btn-sm" onclick="downloadLogs()">下载</button>
               <button class="btn btn-sm btn-danger" onclick="clearLogs()">清空</button>
             </div>
@@ -1651,6 +1659,8 @@
     let currentTaskSearch = '';
     let currentAutoStartStatus = null;
     let currentLogRenderMode = localStorage.getItem('log-render-mode') || 'ansi';
+    // 'current' = 本次运行 (live stream); 'all' = 全部历史 (static, no stream).
+    let currentLogScope = 'current';
     let currentSchedules = [];
     let editingScheduleId = '';
     let schedulesTimer = null;
@@ -1844,14 +1854,70 @@
       return '<span class="' + classes.join(' ') + '">' + escaped + '</span>';
     }
 
-    function setLogContent(content) {
+    // The log viewer is refreshed by a live stream; replacing its content wipes
+    // any text the user is selecting. While a selection is active inside the
+    // viewer, updates are parked in pendingLogContent and flushed as soon as the
+    // selection is cleared — that is what makes log text copyable.
+    let pendingLogContent = null;
+
+    function logSelectionActive() {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
       const logsEl = document.getElementById('logs');
+      return logsEl.contains(sel.anchorNode) && logsEl.contains(sel.focusNode);
+    }
+
+    function setLogContent(content) {
       const text = String(content || '');
+      if (logSelectionActive()) {
+        pendingLogContent = text;
+        return;
+      }
+      pendingLogContent = null;
+      renderLogContent(text);
+    }
+
+    function renderLogContent(text) {
+      const logsEl = document.getElementById('logs');
       if (currentLogRenderMode === 'plain') {
         logsEl.textContent = stripAnsiCodes(text);
         return;
       }
       logsEl.innerHTML = renderAnsiHTML(text);
+    }
+
+    document.addEventListener('selectionchange', () => {
+      if (pendingLogContent !== null && !logSelectionActive()) {
+        renderLogContent(pendingLogContent);
+        pendingLogContent = null;
+      }
+    });
+
+    async function copyLogs() {
+      const text = document.getElementById('logs').textContent || '';
+      if (!text.trim()) {
+        showToast('没有可复制的日志', { type: 'warning' });
+        return;
+      }
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          // Clipboard API needs a secure context; LAN access over plain http
+          // (e.g. --addr 0.0.0.0) falls back to the legacy path.
+          const helper = document.createElement('textarea');
+          helper.value = text;
+          helper.style.position = 'fixed';
+          helper.style.opacity = '0';
+          document.body.appendChild(helper);
+          helper.select();
+          document.execCommand('copy');
+          helper.remove();
+        }
+        showToast('日志已复制到剪贴板', { type: 'success' });
+      } catch (err) {
+        showToast('复制失败', { type: 'error', detail: err.message });
+      }
     }
 
     function isRunningStatus(status) {
@@ -2372,9 +2438,15 @@
       }
 
       const nearBottom = logsEl.scrollTop + logsEl.clientHeight >= logsEl.scrollHeight - 40;
-      const url = taskId === SYSTEM_LOG_ID
-        ? '/api/system-log?tail=400'
-        : '/api/tasks/' + encodeURIComponent(taskId) + '/logs?tail=400';
+      const historyScope = currentLogScope === 'all' && taskId !== SYSTEM_LOG_ID;
+      let url;
+      if (taskId === SYSTEM_LOG_ID) {
+        url = '/api/system-log?tail=400';
+      } else if (historyScope) {
+        url = '/api/tasks/' + encodeURIComponent(taskId) + '/logs?scope=all&tail=2000';
+      } else {
+        url = '/api/tasks/' + encodeURIComponent(taskId) + '/logs?tail=400';
+      }
       const data = await api(url);
 
       if (data && data.code === 0) {
@@ -2433,6 +2505,13 @@
 
       const taskId = document.getElementById('log-task').value;
       if (!taskId) {
+        disconnectLogStream();
+        return;
+      }
+
+      // History view (全部历史) is static — the archived runs never change, so we
+      // read it once instead of streaming.
+      if (currentLogScope === 'all' && taskId !== SYSTEM_LOG_ID) {
         disconnectLogStream();
         return;
       }
@@ -2528,9 +2607,10 @@
         alert('请选择一个任务');
         return;
       }
+      const historyScope = currentLogScope === 'all' && taskId !== SYSTEM_LOG_ID;
       window.location.href = taskId === SYSTEM_LOG_ID
         ? '/api/system-log-download'
-        : '/api/tasks/' + encodeURIComponent(taskId) + '/download-logs';
+        : '/api/tasks/' + encodeURIComponent(taskId) + '/download-logs' + (historyScope ? '?scope=all' : '');
     }
 
     async function loadVersion() {
@@ -2834,6 +2914,11 @@
       connectLogStream();
     });
     document.getElementById('log-task').addEventListener('change', () => {
+      loadLogs();
+      connectLogStream();
+    });
+    document.getElementById('log-scope').addEventListener('change', (event) => {
+      currentLogScope = event.target.value === 'all' ? 'all' : 'current';
       loadLogs();
       connectLogStream();
     });
