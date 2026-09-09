@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -49,6 +50,7 @@ func (c *trayController) onReady() {
 	systray.SetTooltip("驻令台")
 
 	openItem := systray.AddMenuItem("打开控制面板", "Open Dashboard")
+	viewKeyItem := systray.AddMenuItem("查看访问密钥", "View the access key for browser login")
 	systray.AddSeparator()
 	c.taskRoot = systray.AddMenuItem("任务", "Task controls")
 	c.syncTaskMenus()
@@ -71,7 +73,9 @@ func (c *trayController) onReady() {
 		for {
 			select {
 			case <-openItem.ClickedCh:
-				openBrowser(c.rt.Address())
+				openBrowser(c.rt.DashboardURL())
+			case <-viewKeyItem.ClickedCh:
+				openKeyFile(c.rt.AuthKeyPath)
 			case <-ticker.C:
 				c.syncTaskMenus()
 			case <-quitItem.ClickedCh:
@@ -171,4 +175,14 @@ func isTaskRunning(status string) bool {
 func (c *trayController) initVersionMenu() {
 	info := buildinfo.Current()
 	_ = systray.AddMenuItem("Version: "+buildinfo.DisplayVersion(info.Version), "Version")
+}
+
+// openKeyFile opens the access-key file in notepad so the operator can read the
+// base64url string and paste it into the browser login form. GUI release builds
+// have no console, so this is the only way to surface the key on Windows.
+func openKeyFile(path string) {
+	if path == "" {
+		return
+	}
+	_ = exec.Command("notepad", path).Start()
 }

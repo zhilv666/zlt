@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"zhulingtai/internal/auth"
 	"zhulingtai/internal/process"
 	"zhulingtai/internal/scheduler"
 	"zhulingtai/internal/store"
@@ -26,6 +28,12 @@ type Runtime struct {
 	Manager   *process.Manager
 	Sched     *scheduler.Scheduler
 	HTTP      *http.Server
+
+	// Browser authentication. AuthKeyPath is the on-disk path of data/auth.key
+	// (the tray "view key" entry opens it). AuthSessions is closed on shutdown.
+	Auth           *auth.Service
+	AuthKeyPath    string
+	authSessions   *auth.SessionStore
 
 	autoStartOnce sync.Once
 	autoStartErr  error
@@ -72,9 +80,21 @@ func NewRuntime() (*Runtime, error) {
 	return runtime, nil
 }
 
+// StartHTTP binds the listen address synchronously and then serves in a
+// background goroutine. Binding synchronously means a port-in-use or invalid
+// address is a startup-fatal error rather than a silently swallowed failure:
+// previously the goroutine ran `r.HTTP.ListenAndServe()` and its error was
+// discarded with `_ =`, so `zlt start` could report success for a process
+// that never accepted a single connection.
 func (r *Runtime) StartHTTP() error {
+	ln, err := net.Listen("tcp", r.HTTP.Addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", r.HTTP.Addr, err)
+	}
 	go func() {
-		_ = r.HTTP.ListenAndServe()
+		if err := r.HTTP.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("http serve stopped", "err", err)
+		}
 	}()
 	return nil
 }
@@ -109,6 +129,9 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 		}
 		if r.TaskStore != nil {
 			_ = r.TaskStore.Close()
+		}
+		if r.authSessions != nil {
+			_ = r.authSessions.Close()
 		}
 	})
 	return r.shutdownErr
