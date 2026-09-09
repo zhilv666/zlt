@@ -370,7 +370,7 @@
     /* ===== Task list ===== */
     .task-item {
       display: grid;
-      grid-template-columns: minmax(0, 2.2fr) minmax(0, 0.9fr) minmax(0, 1.3fr) auto;
+      grid-template-columns: auto minmax(0, 2.2fr) minmax(0, 0.9fr) minmax(0, 1.3fr) auto;
       gap: 1.25rem;
       align-items: center;
       padding: 1.15rem 1.35rem;
@@ -461,7 +461,7 @@
     /* ===== Schedule list ===== */
     .schedule-item {
       display: grid;
-      grid-template-columns: minmax(0, 1.8fr) minmax(0, 0.9fr) minmax(0, 1.4fr) auto;
+      grid-template-columns: auto minmax(0, 1.8fr) minmax(0, 0.9fr) minmax(0, 1.4fr) auto;
       gap: 1.25rem;
       align-items: center;
       padding: 1.15rem 1.35rem;
@@ -470,7 +470,7 @@
     }
     .schedule-item:last-child { border-bottom: none; }
     .schedule-item:hover { background-color: var(--surface-2); }
-    .schedule-item.schedule-disabled > div:first-child,
+    .schedule-item.schedule-disabled > .schedule-info,
     .schedule-item.schedule-disabled .cron-chip { opacity: 0.55; }
 
     .cron-chip {
@@ -1146,8 +1146,8 @@
     @media (max-width: 992px) {
       .container { padding-top: 1.5rem; }
       .topbar { align-items: flex-start; }
-      .task-item { grid-template-columns: 1fr; gap: 0.75rem; }
-      .schedule-item { grid-template-columns: 1fr; gap: 0.75rem; }
+      .task-item { grid-template-columns: auto 1fr; gap: 0.75rem; }
+      .schedule-item { grid-template-columns: auto 1fr; gap: 0.75rem; }
       .task-desc, .task-meta { white-space: normal; }
       .actions-group { justify-content: flex-start; margin-top: 0.35rem; }
       .footer-inner { grid-template-columns: 1fr; gap: 0.75rem; }
@@ -1156,7 +1156,7 @@
       .form-grid, .form-grid-3 { grid-template-columns: 1fr; }
 
       /* Task meta (autostart / restart / policy / health) → compact 2×2 info panel. */
-      .task-item > div:nth-child(3) {
+      .task-item > .task-info-meta {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 0.5rem 1rem;
@@ -1165,7 +1165,7 @@
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
       }
-      .task-item > div:nth-child(3) .task-meta {
+      .task-item > .task-info-meta .task-meta {
         margin-top: 0 !important;
         min-width: 0;
         overflow-wrap: anywhere;
@@ -1202,7 +1202,7 @@
       .nav-link span { display: none; }
       .log-check { font-size: 0.8rem; }
       /* Too narrow for two columns — stack the meta panel. */
-      .task-item > div:nth-child(3) { grid-template-columns: 1fr; }
+      .task-item > .task-info-meta { grid-template-columns: 1fr; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -1213,10 +1213,101 @@
         scroll-behavior: auto !important;
       }
     }
+
+    /* ---- Auth overlay (login card) ---- */
+    .auth-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg);
+      padding: 1.5rem;
+    }
+    .auth-card {
+      width: 100%; max-width: 380px;
+      background: var(--surface-solid, var(--surface));
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      padding: 2.5rem 2rem 2rem;
+      text-align: center;
+    }
+    .auth-card .brand-mark { margin: 0 auto 1rem; }
+    .auth-card h2 { margin: 0 0 .25rem; font-size: 1.3rem; color: var(--text-main); }
+    .auth-card .auth-subtitle { margin: 0 0 1.5rem; color: var(--text-muted); font-size: .875rem; }
+    .auth-card input[type="password"] {
+      width: 100%; box-sizing: border-box;
+      padding: .625rem .75rem; margin-bottom: .75rem;
+      background: var(--surface-2); color: var(--text-main);
+      border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+      font-family: var(--font-mono); font-size: .875rem;
+    }
+    .auth-card input[type="password"]:focus { outline: none; border-color: var(--brand); box-shadow: var(--ring); }
+    .auth-remember { display: flex; align-items: center; gap: .5rem; margin-bottom: 1.25rem; color: var(--text-muted); font-size: .85rem; cursor: pointer; }
+    .auth-remember input { width: 16px; height: 16px; cursor: pointer; }
+    .auth-card .btn { width: 100%; justify-content: center; }
+    .auth-error { color: var(--danger); font-size: .85rem; margin: .75rem 0 0; min-height: 1.25rem; }
+    .auth-hint { color: var(--text-faint); font-size: .78rem; margin: 1rem 0 0; }
+
+    /* ===== Drag-and-drop sort ===== */
+    .drag-handle {
+      cursor: grab;
+      color: var(--text-faint);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 2px;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+    .drag-handle:hover { color: var(--text-muted); }
+    .drag-handle:active { cursor: grabbing; }
+    .drag-handle.drag-disabled { cursor: default; opacity: 0.25; pointer-events: none; }
+    .drag-ghost {
+      position: fixed;
+      pointer-events: none;
+      z-index: 10000;
+      opacity: 0.85;
+      box-shadow: var(--shadow-lg);
+      border-radius: var(--radius-sm);
+      background: var(--surface-solid, var(--surface));
+    }
+    .task-item.dragging, .schedule-item.dragging { opacity: 0.3; }
+    .drag-dropzone { border-top: 3px solid var(--brand) !important; }
+    .drag-overlay-hint {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      padding: 0.5rem 1rem;
+      background: var(--surface-2);
+      border-radius: var(--radius-sm);
+      border: 1px dashed var(--border-strong);
+      margin: 0.5rem 0;
+    }
   </style>
 </head>
 <body>
-  <div class="container">
+  <!-- Auth overlay: shown until session is established. The app container is
+       hidden behind it so no business UI renders before login. -->
+  <div id="auth-overlay" class="auth-overlay">
+    <div class="auth-card">
+      <div class="brand-mark">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 8 9 12 5 16"/><line x1="12" y1="16" x2="18" y2="16"/></svg>
+      </div>
+      <h2>驻令台</h2>
+      <p class="auth-subtitle">请输入访问密钥登录</p>
+      <form id="login-form" autocomplete="on">
+        <input type="password" id="login-key" placeholder="访问密钥" autocomplete="current-password" autocapitalize="off" spellcheck="false">
+        <label class="auth-remember">
+          <input type="checkbox" id="login-remember" checked>
+          <span>记住此浏览器</span>
+        </label>
+        <button type="submit" class="btn btn-primary" id="login-submit">登录</button>
+        <p id="login-error" class="auth-error"></p>
+        <p class="auth-hint">首次访问请用 <code style="font-family:var(--font-mono)">zlt auth show</code> 查看密钥</p>
+      </form>
+    </div>
+  </div>
+
+  <div class="container" id="app-container" style="display:none;">
     <header class="topbar">
       <div class="brand">
         <div class="brand-mark">
@@ -1252,6 +1343,10 @@
         <button class="icon-btn" id="theme-toggle" type="button" aria-label="切换明暗主题" title="切换明暗主题">
           <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
           <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
+
+        <button class="icon-btn" id="logout-btn" type="button" aria-label="退出登录" title="退出登录" style="display:none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
       </div>
     </header>
@@ -1291,6 +1386,7 @@
               <option value="10">10 / 页</option>
               <option value="20">20 / 页</option>
               <option value="50">50 / 页</option>
+              <option value="0">全部</option>
             </select>
             <button class="btn btn-sm" id="task-page-prev">上一页</button>
             <span class="pagination-meta" id="task-page-indicator">第 1 / 1 页</span>
@@ -1658,7 +1754,7 @@
     let currentLogStreamKey = '';
     let currentTaskSearch = '';
     let currentAutoStartStatus = null;
-    let currentLogRenderMode = localStorage.getItem('log-render-mode') || 'ansi';
+    let currentLogRenderMode = safeStorageGet('log-render-mode') || 'ansi';
     // 'current' = 本次运行 (live stream); 'all' = 全部历史 (static, no stream).
     let currentLogScope = 'current';
     let currentSchedules = [];
@@ -1666,11 +1762,419 @@
     let schedulesTimer = null;
     let scheduleActionInFlight = new Set();
 
+    // safeStorageGet reads from localStorage without throwing when storage is
+    // disabled (private browsing, sandboxed iframes). Returns null on failure.
+    function safeStorageGet(key) {
+      try { return localStorage.getItem(key); } catch (e) { return null; }
+    }
+    function safeStorageSet(key, val) {
+      try { localStorage.setItem(key, val); } catch (e) { /* ignore */ }
+    }
+
+    // ---- Drag-and-drop list sorting (shared by tasks and schedules) ----
+    // During a drag or a pending reorder-save, listDragFrozen tells
+    // renderTasks/renderSchedules to skip the DOM rebuild so the dragged
+    // element and insert indicators are not clobbered by SSE/poll updates.
+    let listDragFrozen = false;
+
+    // setupListDragSort wires Pointer Events drag on a list container. It works
+    // for both the task list and the schedule list — the caller passes the
+    // container id, the reorder URL, and a function to read IDs from the DOM.
+    // Drop on a valid position auto-saves; Esc or drop outside cancels.
+    function setupListDragSort(cfg) {
+      const container = document.getElementById(cfg.containerId);
+      if (!container) return;
+      let drag = null;
+
+      container.addEventListener('pointerdown', function (e) {
+        if (e.button !== 0) return;
+        const handle = e.target.closest('[data-drag-handle]');
+        if (!handle || handle.classList.contains('drag-disabled')) return;
+        const row = handle.closest('[data-row-id]');
+        if (!row) return;
+
+        // Capture the *full* in-memory order at drag start. The DOM only shows
+        // the current page (or the filtered subset), but the server expects the
+        // complete id list as base_ids for optimistic-concurrency detection and
+        // as the canvas onto which the page's new order is spliced back.
+        const fullIds = (typeof cfg.getAllIds === 'function')
+          ? cfg.getAllIds()
+          : Array.from(container.querySelectorAll('[data-row-id]'))
+              .map(function (r) { return r.getAttribute('data-row-id'); });
+        drag = {
+          row: row,
+          id: row.getAttribute('data-row-id'),
+          startX: e.clientX,
+          startY: e.clientY,
+          started: false,
+          targetIndex: -1,
+          dropzone: null,
+          baseIds: fullIds,
+        };
+        e.preventDefault();
+      });
+
+      container.addEventListener('pointermove', function (e) {
+        if (!drag) return;
+        if (!drag.started) {
+          if (Math.abs(e.clientX - drag.startX) < 4 && Math.abs(e.clientY - drag.startY) < 4) return;
+          drag.started = true;
+          listDragFrozen = true;
+          drag.row.classList.add('dragging');
+        }
+        // Find the row under the pointer and determine insertion point.
+        const rows = Array.from(container.querySelectorAll('[data-row-id]'));
+        let foundIndex = -1;
+        let dropzone = null;
+        for (let i = 0; i < rows.length; i++) {
+          if (rows[i] === drag.row) continue;
+          const rect = rows[i].getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          if (e.clientY < midY) {
+            foundIndex = i;
+            dropzone = rows[i];
+            break;
+          }
+        }
+        // If past all rows, drop at end.
+        if (foundIndex === -1 && rows.length > 1) {
+          foundIndex = rows.length;
+        }
+        drag.targetIndex = foundIndex;
+
+        // Update insert indicator.
+        if (drag.dropzone) drag.dropzone.classList.remove('drag-dropzone');
+        if (dropzone && dropzone !== drag.row) {
+          dropzone.classList.add('drag-dropzone');
+          drag.dropzone = dropzone;
+        } else {
+          drag.dropzone = null;
+        }
+      });
+
+      function endDrag(save) {
+        if (!drag) return;
+        if (drag.dropzone) drag.dropzone.classList.remove('drag-dropzone');
+        if (drag.started) {
+          drag.row.classList.remove('dragging');
+          listDragFrozen = false;
+          if (save && drag.targetIndex >= 0) {
+            saveReorder(cfg, drag);
+          } else {
+            // Unfreeze and re-render to restore clean state.
+            if (cfg.onUnfreeze) cfg.onUnfreeze();
+          }
+        }
+        drag = null;
+      }
+
+      container.addEventListener('pointerup', function () { endDrag(true); });
+      container.addEventListener('pointercancel', function () { endDrag(false); });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && drag && drag.started) { endDrag(false); }
+      });
+    }
+
+    // saveReorder builds the full target order by splicing the current page's
+    // new order back into the complete in-memory order captured at drag start,
+    // then sends {ids, base_ids} to the server. base_ids is the pre-drag full
+    // order (optimistic concurrency); ids is the full post-drag order.
+    async function saveReorder(cfg, drag) {
+      const container = document.getElementById(cfg.containerId);
+      const pageRows = Array.from(container.querySelectorAll('[data-row-id]'));
+      // IDs of the rows actually rendered (the current page / "all" view).
+      const pageIdsBefore = pageRows.map(function (r) { return r.getAttribute('data-row-id'); });
+      if (pageIdsBefore.indexOf(drag.id) < 0) {
+        // The dragged row vanished from the DOM mid-drag; bail and reload.
+        listDragFrozen = false;
+        cfg.onReload();
+        return;
+      }
+      // New order of the current page: remove the dragged id, then insert it
+      // at the drop position. drag.targetIndex is an index into the rows list
+      // *including* the dragged row (pointermove skips drag.row), so when the
+      // drop target sits after the dragged row we subtract one to map it onto
+      // the reduced list.
+      const dragRowIdx = pageIdsBefore.indexOf(drag.id);
+      const reduced = pageIdsBefore.filter(function (id) { return id !== drag.id; });
+      let insertAt = drag.targetIndex;
+      if (insertAt < 0) {
+        insertAt = reduced.length;
+      } else {
+        if (insertAt > dragRowIdx) insertAt -= 1;
+        if (insertAt < 0) insertAt = 0;
+        if (insertAt > reduced.length) insertAt = reduced.length;
+      }
+      const pageIdsAfter = reduced.slice();
+      pageIdsAfter.splice(insertAt, 0, drag.id);
+
+      // Splice the page's new order back into the full pre-drag order at the
+      // span the page originally occupied. For the "all" view (or schedules,
+      // which never paginate), pageIdsBefore === baseIds and this just yields
+      // pageIdsAfter as the full new order.
+      let fullIds;
+      const baseIds = drag.baseIds || pageIdsBefore;
+      if (baseIds.length === pageIdsBefore.length) {
+        fullIds = pageIdsAfter.slice();
+      } else {
+        fullIds = baseIds.slice();
+        const pageStart = fullIds.indexOf(pageIdsBefore[0]);
+        if (pageStart < 0) {
+          showToast('排序保存失败', { type: 'error', detail: '列表数据不一致，请重试' });
+          listDragFrozen = false;
+          cfg.onReload();
+          return;
+        }
+        fullIds.splice(pageStart, pageIdsBefore.length, ...pageIdsAfter);
+      }
+
+      try {
+        const res = await fetch(cfg.reorderUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+          },
+          body: JSON.stringify({ ids: fullIds, base_ids: baseIds })
+        });
+        if (res.status === 401) { handleAuthFailure(); return; }
+        if (res.status === 409) {
+          showToast('列表已变化', { type: 'warning', detail: '请重试' });
+          cfg.onReload();
+          return;
+        }
+        if (!res.ok) {
+          const body = await res.json().catch(function () { return {}; });
+          showToast('排序保存失败', { type: 'error', detail: body.msg || ('HTTP ' + res.status) });
+          cfg.onReload();
+          return;
+        }
+        // Success — reload fresh data from server.
+        cfg.onReload();
+      } catch (err) {
+        showToast('排序保存失败', { type: 'error', detail: err.message });
+        cfg.onReload();
+      } finally {
+        listDragFrozen = false;
+      }
+    }
+
+    // Wire up the task list drag sort.
+    setupListDragSort({
+      containerId: 'task-list',
+      reorderUrl: '/api/tasks-order',
+      getAllIds: function () { return currentTasks.map(function (it) { return it.task.id; }); },
+      onReload: function () { loadTasks(); },
+      onUnfreeze: function () { renderTasks(currentTasks); }
+    });
+
+    // Wire up the schedule list drag sort.
+    setupListDragSort({
+      containerId: 'schedule-list',
+      reorderUrl: '/api/schedules-order',
+      getAllIds: function () { return currentSchedules.map(function (it) { return it.schedule.id; }); },
+      onReload: function () { loadSchedules(); },
+      onUnfreeze: function () { renderSchedules(currentSchedules); }
+    });
+    let csrfToken = '';
+    let authOverlay = document.getElementById('auth-overlay');
+    let appContainer = document.getElementById('app-container');
+    let logoutBtn = document.getElementById('logout-btn');
+    let lastTouchTime = 0;
+    let touchPendingTimer = null;
+    let authBroadcast = null;
+    try { authBroadcast = new BroadcastChannel('zlt-auth'); } catch (e) { /* not supported */ }
+
+    // showLoginOverlay / hideLoginOverlay toggle the full-screen login card.
+    // On show we also tear down SSE + timers so no stale data lingers.
+    function showLoginOverlay() {
+      if (tasksEventSource) { tasksEventSource.close(); tasksEventSource = null; }
+      disconnectLogStream();
+      csrfToken = '';
+      logoutBtn.style.display = 'none';
+      appContainer.style.display = 'none';
+      authOverlay.style.display = 'flex';
+      setTimeout(() => document.getElementById('login-key').focus(), 50);
+    }
+    function hideLoginOverlay() {
+      authOverlay.style.display = 'none';
+      appContainer.style.display = '';
+      logoutBtn.style.display = '';
+    }
+
+    // handleAuthFailure is called on 401, SSE auth-failed, or BroadcastChannel
+    // logout-from-another-tab. It drops the UI back to the login card.
+    function handleAuthFailure() {
+      if (authOverlay.style.display !== 'none') return; // already on login
+      showLoginOverlay();
+      showToast('会话已失效', { type: 'warning', detail: '请重新登录' });
+    }
+
+    // checkSession queries the login status. On a live session it arms the CSRF
+    // token and reveals the app; otherwise it shows the login card. Called once
+    // on page load (the only anonymous route besides login itself).
+    async function checkSession() {
+      try {
+        const res = await fetch('/api/auth/session');
+        const body = await res.json();
+        const data = body.data || {};
+        if (data.authenticated) {
+          csrfToken = data.csrf_token || '';
+          hideLoginOverlay();
+          return true;
+        }
+      } catch (e) { /* network error — fall through to login */ }
+      showLoginOverlay();
+      return false;
+    }
+
+    // refreshCSRFToken re-reads the CSRF token from the session endpoint after a
+    // 403-CSRF failure (e.g. server restarted but cookie still valid).
+    async function refreshCSRFToken() {
+      try {
+        const res = await fetch('/api/auth/session');
+        const body = await res.json();
+        const data = body.data || {};
+        if (data.authenticated) {
+          csrfToken = data.csrf_token || '';
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    // doLogin submits the key + remember flag. On success it arms the CSRF token
+    // and reveals the app; on failure it shows the error inline (no alert).
+    async function doLogin(event) {
+      if (event) event.preventDefault();
+      const key = document.getElementById('login-key').value.trim();
+      const remember = document.getElementById('login-remember').checked;
+      const errEl = document.getElementById('login-error');
+      const btn = document.getElementById('login-submit');
+      if (!key) { errEl.textContent = '请输入访问密钥'; return false; }
+      errEl.textContent = ''; btn.disabled = true; btn.textContent = '登录中...';
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key, remember })
+        });
+        const body = await res.json();
+        if (res.status === 429) {
+          errEl.textContent = '尝试过于频繁，请稍后再试';
+        } else if (res.status !== 200 || body.code !== 0) {
+          errEl.textContent = body.msg || '密钥错误';
+        } else {
+          const data = body.data || {};
+          csrfToken = data.csrf_token || '';
+          document.getElementById('login-key').value = '';
+          hideLoginOverlay();
+          // Load the app fresh — do not replay any prior start/stop/delete.
+          loadVersion(); loadTasks(); loadAutoStartStatus(); connectTaskStream();
+          if (authBroadcast) authBroadcast.postMessage({ type: 'login' });
+          return true;
+        }
+      } catch (e) {
+        errEl.textContent = '网络错误，请重试';
+      } finally {
+        btn.disabled = false; btn.textContent = '登录';
+      }
+      return false;
+    }
+
+    // doLogout revokes the current session and returns to the login card.
+    async function doLogout() {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {}
+        });
+      } catch (e) { /* ignore */ }
+      if (authBroadcast) authBroadcast.postMessage({ type: 'logout' });
+      handleAuthFailure();
+    }
+
+    // sendTouch renews the idle session. Only called from the throttled
+    // activity tracker — never from polling or SSE.
+    async function sendTouch() {
+      if (!csrfToken) return;
+      try {
+        const res = await fetch('/api/auth/touch', {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': csrfToken }
+        });
+        if (res.status === 401) handleAuthFailure();
+      } catch (e) { /* ignore — transient network issues don't kill the session */ }
+    }
+
+    // scheduleActivityTouch throttles: at most one touch per 60s. If 60s+ have
+    // passed since the last one, send immediately; otherwise coalesce to the
+    // 60s mark. No activity → no request (the server idle clock runs regardless).
+    function scheduleActivityTouch() {
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      const elapsed = now - lastTouchTime;
+      if (elapsed >= 60000) {
+        lastTouchTime = now;
+        sendTouch();
+      } else if (!touchPendingTimer) {
+        touchPendingTimer = setTimeout(() => {
+          touchPendingTimer = null;
+          lastTouchTime = Date.now();
+          sendTouch();
+        }, 60000 - elapsed);
+      }
+    }
+
+    // Listen for real foreground activity only — clicks, keyboard, touch, scroll.
+    // Hidden-tab events, polling and SSE keepalives do NOT renew the session.
+    ['click', 'keydown', 'touchstart', 'scroll'].forEach(function (evt) {
+      document.addEventListener(evt, scheduleActivityTouch, { passive: true });
+    });
+
+    // Multi-tab logout sync: another tab logging in/out tells this one.
+    if (authBroadcast) {
+      authBroadcast.addEventListener('message', function (e) {
+        if (!e.data || !e.data.type) return;
+        if (e.data.type === 'logout') handleAuthFailure();
+        // On 'login' we just refresh our own session status.
+        if (e.data.type === 'login') checkSession();
+      });
+    }
+
+    // SSE auth-failed: the server sends this when the session expires or is
+    // revoked mid-stream. Both task and log SSE handlers listen for it.
+    function attachAuthFailedListener(es) {
+      if (!es) return;
+      es.addEventListener('auth-failed', function () { handleAuthFailure(); });
+    }
+
+    document.getElementById('login-form').addEventListener('submit', doLogin);
+    logoutBtn.addEventListener('click', doLogout);
+
     document.getElementById('current-year').textContent = new Date().getFullYear();
 
     async function api(url, options = {}) {
       try {
+        const method = (options.method || 'GET').toUpperCase();
+        if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+          options.headers = options.headers || {};
+          if (!options.headers['X-CSRF-Token']) {
+            options.headers['X-CSRF-Token'] = csrfToken;
+          }
+        }
         const res = await fetch(url, options);
+        if (res.status === 401) {
+          handleAuthFailure();
+          return { code: -1, msg: '会话已失效，请重新登录' };
+        }
+        if (res.status === 403) {
+          const body = await res.json().catch(() => ({}));
+          if (body.msg && body.msg.indexOf('csrf') >= 0) {
+            // CSRF token went stale (e.g. after a server restart with a
+            // remembered cookie). Refresh it from the session endpoint.
+            await refreshCSRFToken();
+          }
+          return body;
+        }
         return await res.json();
       } catch (err) {
         console.error(err);
@@ -1945,7 +2449,10 @@
     }
 
     function clampTaskPage(page, totalItems = currentTasks.length) {
-      const totalPages = Math.max(1, Math.ceil(totalItems / currentTaskPageSize));
+      // page size 0 = "全部" (show all → always one page)
+      const totalPages = currentTaskPageSize > 0
+        ? Math.max(1, Math.ceil(totalItems / currentTaskPageSize))
+        : 1;
       if (page < 1) return 1;
       if (page > totalPages) return totalPages;
       return page;
@@ -1990,7 +2497,9 @@
     }
 
     function updateTaskPagination(totalItems) {
-      const totalPages = Math.max(1, Math.ceil(totalItems / currentTaskPageSize));
+      const totalPages = currentTaskPageSize > 0
+        ? Math.max(1, Math.ceil(totalItems / currentTaskPageSize))
+        : 1;
       currentTaskPage = clampTaskPage(currentTaskPage, totalItems);
 
       document.getElementById('task-pagination-meta').textContent = '共 ' + totalItems + ' 个任务';
@@ -2218,10 +2727,18 @@
       currentTasks = items;
       const filteredItems = getFilteredTasks();
 
+      // When a drag or reorder-save is in progress, freeze the DOM so SSE/poll
+      // updates don't clobber the dragged element or insert indicators. We still
+      // accept the data into currentTasks (already done above) so the next
+      // unfrozen render is fresh.
+      if (listDragFrozen) return;
+
       if (pendingTaskFocusId) {
         const targetIndex = filteredItems.findIndex((item) => item.task.id === pendingTaskFocusId);
         if (targetIndex >= 0) {
-          currentTaskPage = Math.floor(targetIndex / currentTaskPageSize) + 1;
+          currentTaskPage = currentTaskPageSize > 0
+            ? Math.floor(targetIndex / currentTaskPageSize) + 1
+            : 1;
         }
         pendingTaskFocusId = '';
       }
@@ -2242,8 +2759,9 @@
 
       root.innerHTML = '';
 
-      const start = (currentTaskPage - 1) * currentTaskPageSize;
-      const pageItems = filteredItems.slice(start, start + currentTaskPageSize);
+      const pageSize = currentTaskPageSize > 0 ? currentTaskPageSize : filteredItems.length;
+      const start = (currentTaskPage - 1) * (currentTaskPageSize > 0 ? currentTaskPageSize : 1);
+      const pageItems = filteredItems.slice(start, start + pageSize);
 
       pageItems.forEach(item => {
         const status = item.status.status || 'stopped';
@@ -2267,7 +2785,10 @@
 
         const row = document.createElement('div');
         row.className = 'task-item';
+        row.setAttribute('data-row-id', item.task.id);
+        const canDrag = !currentTaskSearch.trim();
         row.innerHTML =
+          '<div class="drag-handle' + (canDrag ? '' : ' drag-disabled') + '" data-drag-handle title="' + (canDrag ? '拖动排序' : '搜索时不可排序') + '"><svg style="width:16px;height:16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg></div>' +
           '<div>' +
             '<div class="task-name">' + escapeHTML(item.task.name) + ' <span style="color:var(--text-muted);font-weight:normal;font-size:0.85rem;">(' + escapeHTML(item.task.id) + ')</span></div>' +
             '<div class="task-desc" title="' + escapeHTML(item.task.program) + ' ' + escapeHTML((item.task.args || []).join(' ')) + '">' +
@@ -2284,7 +2805,7 @@
             (item.status.pid ? '<div class="task-meta" style="margin-top:4px;">PID: ' + item.status.pid + '</div>' : '') +
             lastError +
           '</div>' +
-          '<div>' +
+          '<div class="task-info-meta">' +
             '<div class="task-meta">自动启动: <strong>' + (item.task.autostart ? '是' : '否') + '</strong></div>' +
             '<div class="task-meta" style="margin-top:4px;">异常重启: <strong>' + (item.task.restart_on_crash ? '是' : '否') + '</strong></div>' +
             '<div class="task-meta" style="margin-top:4px;">重启策略: <strong>' + escapeHTML(String(item.task.restart_delay_sec || 2)) + 's / ' + escapeHTML(String(item.task.max_restart_count || 0)) + '次</strong></div>' +
@@ -2477,6 +2998,7 @@
           console.error(err);
         }
       });
+      attachAuthFailedListener(tasksEventSource);
       tasksEventSource.onerror = () => {
         loadTasks();
       };
@@ -2527,6 +3049,7 @@
         ? '/api/system-log-stream?tail=400'
         : '/api/tasks/' + encodeURIComponent(taskId) + '/logs-stream?tail=400';
       logsEventSource = new EventSource(streamURL);
+      attachAuthFailedListener(logsEventSource);
       logsEventSource.addEventListener('logs', (event) => {
         try {
           const payload = JSON.parse(event.data);
@@ -2565,8 +3088,36 @@
       await loadLogs();
     }
 
+    // authenticatedDownload fetches a file endpoint with the session cookie,
+    // handles 401 (session expired), then triggers a browser download from the
+    // blob. Direct window.location.href cannot intercept a 401, so downloads
+    // must go through this path when auth is enabled.
+    async function authenticatedDownload(url, filename) {
+      try {
+        const res = await fetch(url);
+        if (res.status === 401) {
+          handleAuthFailure();
+          return;
+        }
+        if (!res.ok) {
+          showToast('下载失败', { type: 'error', detail: 'HTTP ' + res.status });
+          return;
+        }
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+      } catch (err) {
+        showToast('下载失败', { type: 'error', detail: err.message });
+      }
+    }
+
     function exportTasks() {
-      window.location.href = '/api/tasks-export';
+      authenticatedDownload('/api/tasks-export', 'tasks-export.json');
     }
 
     async function importTasks(file) {
@@ -2608,9 +3159,10 @@
         return;
       }
       const historyScope = currentLogScope === 'all' && taskId !== SYSTEM_LOG_ID;
-      window.location.href = taskId === SYSTEM_LOG_ID
+      const url = taskId === SYSTEM_LOG_ID
         ? '/api/system-log-download'
         : '/api/tasks/' + encodeURIComponent(taskId) + '/download-logs' + (historyScope ? '?scope=all' : '');
+      authenticatedDownload(url, (taskId === SYSTEM_LOG_ID ? 'app' : taskId) + '.log');
     }
 
     async function loadVersion() {
@@ -2657,8 +3209,11 @@
       currentSchedules = items;
       const root = document.getElementById('schedule-list');
 
+      // Freeze during drag/save (same pattern as the task list).
+      if (listDragFrozen) return;
+
       if (items.length === 0) {
-        root.innerHTML = '<div class="empty-state">暂无计划，点击右上方“添加计划”为任务配置定时启动、停止或重启。</div>';
+        root.innerHTML = '<div class="empty-state">暂无计划，点击右上方"添加计划"为任务配置定时启动、停止或重启。</div>';
         return;
       }
 
@@ -2684,8 +3239,10 @@
 
         const row = document.createElement('div');
         row.className = 'schedule-item' + (sch.enabled ? '' : ' schedule-disabled');
+        row.setAttribute('data-row-id', sch.id);
         row.innerHTML =
-          '<div>' +
+          '<div class="drag-handle" data-drag-handle title="拖动排序"><svg style="width:16px;height:16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg></div>' +
+          '<div class="schedule-info">' +
             '<div class="task-name">' + escapeHTML(sch.name) + idChip + '</div>' +
             '<div style="margin-bottom:0.3rem;"><span class="cron-chip">' + escapeHTML(sch.cron_expr) + '</span>' +
               (sch.timezone ? ' <span class="task-meta" style="display:inline;">' + escapeHTML(sch.timezone) + '</span>' : '') +
@@ -2884,10 +3441,15 @@
 
     // Init
     document.getElementById('log-render-mode').value = currentLogRenderMode;
-    loadVersion();
-    loadTasks();
-    loadAutoStartStatus();
-    connectTaskStream();
+    // Check the auth session first. If authenticated, load the app data and
+    // open SSE; otherwise the login overlay stays up and nothing loads.
+    checkSession().then(function (ok) {
+      if (!ok) return;
+      loadVersion();
+      loadTasks();
+      loadAutoStartStatus();
+      connectTaskStream();
+    });
 
     // Trigger task selection change
     document.getElementById('task-page-size').addEventListener('change', (event) => {
@@ -2924,7 +3486,7 @@
     });
     document.getElementById('log-render-mode').addEventListener('change', (event) => {
       currentLogRenderMode = event.target.value === 'plain' ? 'plain' : 'ansi';
-      localStorage.setItem('log-render-mode', currentLogRenderMode);
+      safeStorageSet('log-render-mode', currentLogRenderMode);
       loadLogs();
     });
     document.getElementById('log-auto-refresh').addEventListener('change', () => {
