@@ -35,6 +35,11 @@ func NewTaskStore(dbPath string, jsonPath string) (*TaskStore, error) {
 		jsonPath: jsonPath,
 	}
 
+	if err := store.initMetaTable(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	if err := store.initSchema(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -69,7 +74,7 @@ func (s *TaskStore) Load() ([]task.Config, error) {
 	rows, err := s.db.Query(`
 		SELECT id, name, program, args_json, workdir, env_json, autostart, restart_on_crash, stop_timeout_sec, restart_delay_sec, max_restart_count, health_check_url, health_check_interval_sec, health_check_failure_threshold
 		FROM tasks
-		ORDER BY rowid ASC
+		ORDER BY sort_order ASC, rowid ASC
 	`)
 	if err != nil {
 		return nil, err
@@ -127,33 +132,34 @@ func (s *TaskStore) Save(tasks []task.Config) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	// 统一延迟回滚：提交成功后 Rollback 返回 ErrTxDone（已忽略）；
+	// 任一错误路径都会回滚未提交事务。此前循环内用 := 重新声明 err
+	// 遮蔽外层，导致循环中 marshal/exec 失败时 defer 看到的外层 err 仍为
+	// nil 而跳过回滚，事务被遗弃并泄漏连接。循环内改用独立变量 mErr
+	// 彻底消除遮蔽，并由无条件延迟回滚兜底。
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err = tx.Exec(`DELETE FROM tasks`); err != nil {
 		return err
 	}
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO tasks (id, name, program, args_json, workdir, env_json, autostart, restart_on_crash, stop_timeout_sec, restart_delay_sec, max_restart_count, health_check_url, health_check_interval_sec, health_check_failure_threshold)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO tasks (id, name, program, args_json, workdir, env_json, autostart, restart_on_crash, stop_timeout_sec, restart_delay_sec, max_restart_count, health_check_url, health_check_interval_sec, health_check_failure_threshold, sort_order)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	for _, cfg := range tasks {
-		argsJSON, err := json.Marshal(cfg.Args)
-		if err != nil {
-			return err
+	for i, cfg := range tasks {
+		argsJSON, mErr := json.Marshal(cfg.Args)
+		if mErr != nil {
+			return mErr
 		}
-		envJSON, err := json.Marshal(cfg.Env)
-		if err != nil {
-			return err
+		envJSON, mErr := json.Marshal(cfg.Env)
+		if mErr != nil {
+			return mErr
 		}
 
 		if _, err = stmt.Exec(
@@ -171,6 +177,7 @@ func (s *TaskStore) Save(tasks []task.Config) error {
 			cfg.HealthCheckURL,
 			cfg.HealthCheckIntervalSec,
 			cfg.HealthCheckFailureThreshold,
+			i,
 		); err != nil {
 			return err
 		}
@@ -221,6 +228,19 @@ func (s *TaskStore) initSchema() error {
 	_, err = s.db.Exec(`ALTER TABLE tasks ADD COLUMN health_check_failure_threshold INTEGER NOT NULL DEFAULT 0`)
 	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	// One-time backfill: copy rowid into sort_order so existing rows keep their
+	// insertion order. A meta marker prevents re-backfilling after the first
+	// migration — subsequent Save() calls write sort_order = slice index.
+	if migrated, _ := s.metaGet("tasks_sort_order_migrated"); migrated == "" {
+		if _, err = s.db.Exec(`UPDATE tasks SET sort_order = rowid WHERE sort_order = 0`); err != nil {
+			return err
+		}
+		_ = s.metaSet("tasks_sort_order_migrated", "1")
 	}
 	return nil
 }

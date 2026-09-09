@@ -1,6 +1,8 @@
 package store
 
 import (
+	"strings"
+
 	"zhulingtai/internal/task"
 )
 
@@ -26,14 +28,29 @@ func (s *TaskStore) initScheduleSchema() error {
 			updated_at TEXT NOT NULL DEFAULT ''
 		)
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`ALTER TABLE schedules ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	// One-time backfill: preserve insertion order on upgrade.
+	if migrated, _ := s.metaGet("schedules_sort_order_migrated"); migrated == "" {
+		if _, err = s.db.Exec(`UPDATE schedules SET sort_order = rowid WHERE sort_order = 0`); err != nil {
+			return err
+		}
+		_ = s.metaSet("schedules_sort_order_migrated", "1")
+	}
+	return nil
 }
 
 func (s *TaskStore) LoadSchedules() ([]task.Schedule, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, name, cron_expr, timezone, action, enabled, last_run_at, last_status, last_detail, created_at, updated_at
 		FROM schedules
-		ORDER BY rowid ASC
+		ORDER BY sort_order ASC, rowid ASC
 	`)
 	if err != nil {
 		return nil, err
@@ -91,15 +108,15 @@ func (s *TaskStore) SaveSchedules(schedules []task.Schedule) error {
 	}
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO schedules (id, task_id, name, cron_expr, timezone, action, enabled, last_run_at, last_status, last_detail, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO schedules (id, task_id, name, cron_expr, timezone, action, enabled, last_run_at, last_status, last_detail, created_at, updated_at, sort_order)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	for _, sch := range schedules {
+	for i, sch := range schedules {
 		if _, err = stmt.Exec(
 			sch.ID,
 			sch.TaskID,
@@ -113,6 +130,7 @@ func (s *TaskStore) SaveSchedules(schedules []task.Schedule) error {
 			sch.LastDetail,
 			sch.CreatedAt,
 			sch.UpdatedAt,
+			i,
 		); err != nil {
 			return err
 		}
