@@ -19,7 +19,9 @@
 - Cron 计划任务定时启动、停止或重启任务
 - 任务日志与系统日志查看、下载和清理
 - ANSI 彩色日志渲染
-- 任务搜索、筛选和分页
+- 任务搜索、筛选和分页（含"全部"模式）
+- 任务和计划列表拖拽排序，顺序持久化
+- 密钥鉴权保护管理界面，闲置 7 天自动过期，前台操作续期
 - Windows 软件开机自启与 Linux 无界面运行
 - Windows、Linux、macOS 跨平台构建与发布
 
@@ -39,6 +41,99 @@ Windows GUI 版：
 默认控制面板地址：`http://127.0.0.1:3719`
 
 > 每个版本的更新内容统一记录在 [CHANGELOG.md](./CHANGELOG.md)。
+
+## 访问鉴权
+
+驻令台的管理界面受密钥鉴权保护。首次启动时自动生成一个 32 字节随机密钥，保存在 `data/auth.key`。浏览器首次访问需要输入此密钥登录。
+
+### 查看密钥
+
+```sh
+# 命令行
+./bin/zlt-current auth show
+
+# Windows 托盘菜单 → "查看访问密钥"（用记事本打开密钥文件）
+```
+
+### 浏览器登录
+
+1. 打开控制面板，看到登录卡片
+2. 输入访问密钥，勾选"记住此浏览器"（默认勾选）
+3. 登录成功后加载任务、计划、日志和实时连接
+
+### 会话与闲置续期
+
+- 登录后服务端签发会话令牌，通过 HttpOnly + SameSite=Strict Cookie 保存
+- 服务端闲置 7 天过期；实际前台操作（点击、键盘、触摸、滚动）最多每 60 秒续期一次
+- 普通轮询、SSE 保活和隐藏页面活动不续期
+- 勾选"记住"后浏览器和服务端重启后保持登录；未勾选则关闭浏览器即失效
+
+### 退出登录
+
+点击右上角退出按钮，或密钥重置后所有浏览器自动失效。
+
+### 重置密钥
+
+```sh
+./bin/zlt-current auth reset           # 默认实例
+./bin/zlt-current auth reset --pid-file data/zlt.pid
+```
+
+重置要求对应实例已停止。删除 `data/auth.key` 和 `data/auth.db`，下次启动生成新密钥，所有已登录浏览器需要重新登录。
+
+### 反向代理与 HTTPS
+
+通过 `ZLT_PUBLIC_URL` 环境变量声明公开地址后，Cookie 启用 Secure，托盘和重复启动打开的控制面板使用该地址：
+
+```sh
+export ZLT_PUBLIC_URL=https://zlt.example.com
+./bin/zlt-current run
+```
+
+反向代理配置要点：
+
+- 转发到本机 HTTP 监听端口（默认 `127.0.0.1:3719`）
+- 保留公开 Host 头
+- 关闭 SSE 缓冲（Nginx 加 `proxy_buffering off` 或 `X-Accel-Buffering: no`）
+- 可信代理范围默认仅回环地址；如需信任非回环代理，用 `ZLT_TRUSTED_PROXIES` 指定 CIDR
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3719;
+    proxy_set_header Host $host;
+    proxy_buffering off;
+    proxy_cache off;
+    # SSE 长连接
+    proxy_read_timeout 1h;
+}
+```
+
+### 脚本访问管理接口
+
+升级后，所有管理接口需要登录会话。脚本需要先登录获取 Cookie 和 CSRF token：
+
+```sh
+# 登录并保存 Cookie
+KEY=$(./bin/zlt-current auth show)
+curl -c cookies.txt -X POST http://127.0.0.1:3719/api/auth/login \
+  -H "Content-Type: application/json" \
+  -H "Origin: http://127.0.0.1:3719" \
+  -d "{\"key\":\"$KEY\",\"remember\":false}"
+
+# 从登录响应或 /api/auth/session 获取 csrf_token，写入请求头
+CSRF=$(curl -b cookies.txt http://127.0.0.1:3719/api/auth/session | jq -r .data.csrf_token)
+
+# 带 Cookie 和 CSRF 发送写请求
+curl -b cookies.txt -H "X-CSRF-Token: $CSRF" \
+  -X POST http://127.0.0.1:3719/api/tasks \
+  -H "Content-Type: application/json" -d '{...}'
+```
+
+### 升级说明
+
+- 数据库迁移自动执行：tasks 和 schedules 表增加 `sort_order` 列，按旧顺序回填
+- 首次升级后启动自动生成密钥文件 `data/auth.key`，之后访问管理接口需要登录
+- 原有任务和计划数据完全兼容，顺序保持不变
 
 <details>
 <summary>项目命名与设计理念</summary>
@@ -60,6 +155,7 @@ Windows GUI 版：
 ├── internal/
 │   ├── api/             # HTTP API
 │   ├── app/             # 运行时、托盘、CLI、自启动
+│   ├── auth/            # 密钥鉴权、会话、CSRF
 │   ├── process/         # 进程管理
 │   ├── scheduler/       # Cron 计划任务调度器
 │   ├── store/           # SQLite 持久化
@@ -116,7 +212,14 @@ Linux 软件开机自启：
 ./bin/zlt-linux-amd64 autostart disable
 ```
 
-Windows 可在网页“设置”页面查看、启用或停用软件开机自启。
+访问密钥管理：
+
+```sh
+./bin/zlt-current auth show              # 查看密钥
+./bin/zlt-current auth reset             # 重置密钥（需先停止）
+```
+
+Windows 可在网页"设置"页面查看、启用或停用软件开机自启。
 
 </details>
 
@@ -186,6 +289,13 @@ DELETE /api/schedules/{id}
 POST   /api/schedules/{id}/enable
 POST   /api/schedules/{id}/disable
 POST   /api/schedules/{id}/run
+```
+
+任务和计划排序：
+
+```text
+PUT    /api/tasks-order        # {ids: [...], base_ids: [...]}
+PUT    /api/schedules-order     # {ids: [...], base_ids: [...]}
 ```
 
 </details>
