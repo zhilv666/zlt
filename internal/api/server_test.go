@@ -135,6 +135,7 @@ func (testRuntime) DeleteTask(string) error          { return nil }
 func (testRuntime) RestartTask(string) error         { return nil }
 func (r testRuntime) ExportTasks() []task.Config     { return r.tasks }
 func (testRuntime) ReplaceTasks([]task.Config) error { return nil }
+func (testRuntime) ReorderTasks(ids, baseIDs []string) error { return nil }
 
 type testManager struct {
 	states []process.RuntimeState
