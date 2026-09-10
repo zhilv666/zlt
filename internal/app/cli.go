@@ -231,43 +231,47 @@ func printHelp() {
 }
 
 func helpText() string {
-	return `驻令台
+	return `zlt - Zhulingtai (驻令台) task daemon
 
-用法:
+Usage:
   zlt
-  zlt run [--addr <host:port>] [--pid-file <path>] [--workdir <path>]
-  zlt start [--addr <host:port>] [--pid-file <path>]
-  zlt stop [--pid-file <path>]
-  zlt restart [--addr <host:port>] [--pid-file <path>]
-  zlt status [--pid-file <path>]
+  zlt run [options]
+  zlt start [options]
+  zlt stop [options]
+  zlt restart [options]
+  zlt status [options]
   zlt autostart <enable|disable|status>
-  zlt auth <show|reset> [--pid-file <path>]
+  zlt auth <show|reset|set> [options]
   zlt version
-  zlt --version
   zlt -h | --help
+  zlt -v | --version
 
-说明:
-  zlt
-    默认启动图形/托盘模式
+Commands:
+  (no command)        Start the app in tray/GUI mode (default)
+  run                 Run in the foreground without a UI
+  start               Start as a background service
+  stop                Stop the background service
+  restart             Restart the background service
+  status              Show whether the service is running
+  autostart           Manage auto-start at login
+  auth                Manage the browser access key
+  version             Print build and version details
 
-  zlt run
-    以前台无界面模式运行
+Options:
+  -h, --help          Show this help and exit
+  -v, --version       Print build and version details and exit
 
-  zlt start
-    以后端常驻方式启动
+Service options:
+  --addr, --listen <host:port>
+                      HTTP listen address (default: 127.0.0.1:3719)
+  --pid-file <path>   Single-instance lock / status file (default: data/zlt.pid)
+  --workdir <path>    Change to this directory before starting (run only)
 
-  单例运行:
-    同一工作目录下仅允许一个实例运行。重复启动时，托盘模式会打开已运行
-    实例的控制面板，命令行模式会报错退出。
+Notes:
+  Only one instance is allowed per working directory. A duplicate GUI launch
+  opens the running instance's dashboard; a duplicate CLI launch fails.
 
-参数:
-  --addr, --listen
-    指定 HTTP 监听地址，例如:
-    127.0.0.1:3719
-    0.0.0.0:3719
-
-  --pid-file
-    指定进程状态/单例锁文件路径 (默认 data/zlt.pid)
+Run 'zlt auth -h' for access-key management.
 `
 }
 
