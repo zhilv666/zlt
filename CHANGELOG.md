@@ -2,6 +2,28 @@
 
 本文件集中记录驻令台各版本的重要变化。后续正式版本发布时，GitHub Actions 会自动将新版本内容插入到文件顶部。
 
+## v0.3.0 (2026-09-10)
+
+### Features
+
+- ✨ feat(app): 新增 zlt auth set 手动设置访问密钥 (b2bcc83)
+- ✨ feat(auth): 访问密钥改为保存文本以支持自定义口令 (2d3a17b)
+- ✨ feat(web): 网页登录与双列表拖拽排序 (830714f)
+- ✨ feat(app): 鉴权装配、密钥命令与排序运行时 (7a2d7a6)
+- ✨ feat(api): 鉴权中间件、SSE 失效保护与排序端点 (b9f6c21)
+- ✨ feat(auth): 密钥会话与统一鉴权 (13d0df3)
+
+### Fixes
+
+- 🐛 fix(store): 修复保存事务回滚遗漏并支持排序持久化 (e78a4d6)
+
+### Documentation
+
+- 📝 docs(readme): 补充手动设置访问密钥与升级说明 (f6df1e9)
+- 📝 docs(cli): 重写 zlt -h 帮助为英文标准排版 (a78c4a6)
+- 📝 docs: 同步鉴权、排序、反向代理与升级说明 (a60e7cc)
+- 📝 docs(changelog): 更新 v0.2.7 变更日志 [skip ci] (6ef2b83)
+
 ## v0.2.7 (2026-07-15)
 
 ### Features
