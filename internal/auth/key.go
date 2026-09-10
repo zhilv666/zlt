@@ -17,48 +17,67 @@ import (
 	"strings"
 )
 
-// keySize is the entropy length of a generated access key, in bytes.
-const keySize = 32
+// randomBytes is the entropy length of a randomly generated access key, in bytes.
+const randomBytes = 32
 
-// LoadOrCreateKey loads the access key from path, or generates a fresh
-// 32-byte key on first run and persists it with restrictive permissions.
+// minSecretLen is the minimum length of a manually chosen access key. Generated
+// keys (43 chars) always pass; the bound only guards `auth set` passphrases.
+const minSecretLen = 8
+
+// LoadOrCreateKey loads the access key from path, or generates a fresh random
+// key on first run and persists it with restrictive permissions.
 //
-// The key file holds the base64url string the operator enters at the login
-// prompt (and what `zlt auth show` prints). An existing but empty, malformed
-// or wrong-length file is a hard error: the key is never silently replaced,
-// because doing so would invalidate every session and leave the operator
-// without the value they need to log in.
-func LoadOrCreateKey(path string) ([]byte, error) {
+// The file holds the exact text the operator enters at the login prompt (and
+// what `zlt auth show` prints): either a random base64url string or a manually
+// chosen passphrase. An existing but empty file is a hard error — the key is
+// never silently replaced, because doing so would invalidate every session and
+// leave the operator without the value they need to log in.
+func LoadOrCreateKey(path string) (string, error) {
 	if raw, err := os.ReadFile(path); err == nil {
-		return parseStoredKey(raw, path)
+		text := strings.TrimSpace(string(raw))
+		if text == "" {
+			return "", fmt.Errorf("auth key file %s is empty", path)
+		}
+		return text, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return "", err
 	}
 
-	buf := make([]byte, keySize)
-	if _, err := rand.Read(buf); err != nil {
-		return nil, fmt.Errorf("generate access key: %w", err)
+	secret, err := RandomSecret()
+	if err != nil {
+		return "", fmt.Errorf("generate access key: %w", err)
 	}
-	encoded := DisplayKey(buf)
-	if err := writeKeyFile(path, []byte(encoded)); err != nil {
-		return nil, err
+	if err := WriteKeyFile(path, secret); err != nil {
+		return "", err
 	}
-	return buf, nil
+	return secret, nil
 }
 
-func parseStoredKey(raw []byte, path string) ([]byte, error) {
-	text := strings.TrimSpace(string(raw))
-	if text == "" {
-		return nil, fmt.Errorf("auth key file %s is empty", path)
+// RandomSecret returns a new random access key rendered as base64url. It stays
+// base64url only as the display encoding of fresh random bytes; a key set
+// manually via `auth set` is stored verbatim instead.
+func RandomSecret() (string, error) {
+	buf := make([]byte, randomBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
 	}
-	decoded, err := base64.RawURLEncoding.DecodeString(text)
-	if err != nil {
-		return nil, fmt.Errorf("auth key file %s is not valid base64url: %w", path, err)
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// WriteKeyFile stores a manually chosen access key verbatim (single line,
+// no surrounding whitespace, at least minSecretLen characters) and restricts
+// the file the same way a generated key is protected.
+func WriteKeyFile(path, secret string) error {
+	if strings.TrimSpace(secret) != secret {
+		return errors.New("access key must not start or end with whitespace")
 	}
-	if len(decoded) != keySize {
-		return nil, fmt.Errorf("auth key file %s has wrong length: got %d bytes, want %d", path, len(decoded), keySize)
+	if strings.ContainsAny(secret, "\r\n") {
+		return errors.New("access key must be a single line")
 	}
-	return decoded, nil
+	if len(secret) < minSecretLen {
+		return fmt.Errorf("access key must be at least %d characters", minSecretLen)
+	}
+	return writeKeyFile(path, []byte(secret+"\n"))
 }
 
 func writeKeyFile(path string, content []byte) error {
@@ -71,29 +90,24 @@ func writeKeyFile(path string, content []byte) error {
 	return secureKeyFile(path)
 }
 
-// DisplayKey returns the base64url string the operator enters at login.
-func DisplayKey(key []byte) string {
-	return base64.RawURLEncoding.EncodeToString(key)
-}
-
-// KeyFingerprint is a stable hash of the key, stored per session so that
-// rotating the key (auth reset) invalidates every session issued under the old
-// key without having to enumerate the session table.
-func KeyFingerprint(key []byte) string {
-	sum := sha256.Sum256(key)
+// Fingerprint is a stable hash of the access key, stored per session so that
+// changing the key (auth set or reset) invalidates every session issued under
+// the old key without having to enumerate the session table.
+func Fingerprint(secret string) string {
+	sum := sha256.Sum256([]byte(secret))
 	return hex.EncodeToString(sum[:])
 }
 
-// VerifyKey compares a user-supplied key string against the stored key in
-// constant time. Accepts the base64url string the user pastes.
-func VerifyKey(supplied string, key []byte) bool {
-	want := DisplayKey(key)
-	return subtle.ConstantTimeCompare([]byte(supplied), []byte(want)) == 1
+// VerifyKey compares a user-supplied key string against the stored access key
+// in constant time. Leading/trailing whitespace on the supplied value is
+// ignored, matching what the web login form trims client-side.
+func VerifyKey(supplied, secret string) bool {
+	supplied = strings.TrimSpace(supplied)
+	return subtle.ConstantTimeCompare([]byte(supplied), []byte(secret)) == 1
 }
 
-// ReadKeyFile returns the display string stored in the key file, for `zlt auth
-// show` and the tray "view key" entry. The raw bytes are not handed out here;
-// callers that need them should hold the in-memory key.
+// ReadKeyFile returns the access key text stored in the file, for `zlt auth
+// show` and the tray "view key" entry.
 func ReadKeyFile(path string) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -102,9 +116,6 @@ func ReadKeyFile(path string) (string, error) {
 	text := strings.TrimSpace(string(raw))
 	if text == "" {
 		return "", fmt.Errorf("auth key file %s is empty", path)
-	}
-	if _, err := base64.RawURLEncoding.DecodeString(text); err != nil {
-		return "", fmt.Errorf("auth key file %s is not valid base64url: %w", path, err)
 	}
 	return text, nil
 }

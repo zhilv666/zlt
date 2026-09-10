@@ -46,8 +46,8 @@ func TestLoadOrCreateKey_GeneratesAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first load: %v", err)
 	}
-	if len(k1) != keySize {
-		t.Fatalf("key length: %d", len(k1))
+	if k1 == "" {
+		t.Fatal("empty key")
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("key file not created: %v", err)
@@ -57,43 +57,87 @@ func TestLoadOrCreateKey_GeneratesAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second load: %v", err)
 	}
-	if string(k1) != string(k2) {
+	if k1 != k2 {
 		t.Fatal("key changed between calls")
 	}
 }
 
-func TestLoadOrCreateKey_CorruptFileErrors(t *testing.T) {
+func TestLoadOrCreateKey_EmptyFileErrors(t *testing.T) {
 	path := tempKeyPath(t)
-	if err := os.WriteFile(path, []byte("not-valid-base64!@#"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("   \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadOrCreateKey(path); err == nil {
-		t.Fatal("expected error for corrupt key file, got nil")
+		t.Fatal("expected error for empty key file, got nil")
 	}
 }
 
-func TestLoadOrCreateKey_WrongLengthErrors(t *testing.T) {
-	path := tempKeyPath(t)
-	// Valid base64url but only 16 bytes — must not be silently accepted.
-	if err := os.WriteFile(path, []byte(DisplayKey(make([]byte, 16))), 0o600); err != nil {
+func TestRandomSecret(t *testing.T) {
+	a, err := RandomSecret()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadOrCreateKey(path); err == nil {
-		t.Fatal("expected error for wrong-length key, got nil")
+	b, err := RandomSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == "" || b == "" {
+		t.Fatal("empty random secret")
+	}
+	if a == b {
+		t.Fatal("two random secrets collided")
+	}
+}
+
+func TestWriteKeyFileValidation(t *testing.T) {
+	path := tempKeyPath(t)
+	cases := []struct {
+		name   string
+		secret string
+		ok     bool
+	}{
+		{"valid passphrase", "correct horse battery", true},
+		{"too short", "short", false},
+		{"leading whitespace", " passphrase", false},
+		{"trailing whitespace", "passphrase ", false},
+		{"multiline", "line1\nline2", false},
+		{"exactly min length", strings.Repeat("k", minSecretLen), true},
+	}
+	for _, c := range cases {
+		err := WriteKeyFile(path, c.secret)
+		if c.ok && err != nil {
+			t.Errorf("%s: expected ok, got %v", c.name, err)
+		}
+		if !c.ok && err == nil {
+			t.Errorf("%s: expected error, got ok", c.name)
+		}
+	}
+	if err := WriteKeyFile(path, "valid-after-rejects"); err != nil {
+		t.Fatalf("write after rejected attempts: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(got)) != "valid-after-rejects" {
+		t.Fatalf("stored value: %q", string(got))
 	}
 }
 
 func TestVerifyKey(t *testing.T) {
-	key := make([]byte, keySize)
-	display := DisplayKey(key)
-	if !VerifyKey(display, key) {
+	secret := "some-passphrase-123"
+	if !VerifyKey(secret, secret) {
 		t.Fatal("correct key rejected")
 	}
-	if VerifyKey(display+"x", key) {
+	if VerifyKey(secret+"x", secret) {
 		t.Fatal("wrong key accepted")
 	}
-	if VerifyKey("", key) {
+	if VerifyKey("", secret) {
 		t.Fatal("empty key accepted")
+	}
+	// Login trims whitespace on the supplied value.
+	if !VerifyKey("  "+secret+"  ", secret) {
+		t.Fatal("whitespace-padded correct key rejected")
 	}
 }
 
@@ -154,7 +198,7 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 }
 
-// Rotating the key (new fingerprint) invalidates every existing session.
+// Changing the key (new fingerprint) invalidates every existing session.
 func TestSessionKeyFingerprintInvalidation(t *testing.T) {
 	clk := newClock()
 	store, _ := NewSessionStore(tempSessionPath(t))
@@ -173,7 +217,7 @@ func TestSessionKeyFingerprintInvalidation(t *testing.T) {
 
 // authTestMux wires the four auth endpoints plus a single protected route,
 // wrapped by the middleware, mirroring how the real server uses the Service.
-func authTestMux(t *testing.T, s *Service) http.Handler {
+func authTestMux(s *Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/login", s.HandleLogin)
 	mux.HandleFunc("/api/auth/session", s.HandleSession)
@@ -185,9 +229,9 @@ func authTestMux(t *testing.T, s *Service) http.Handler {
 	return s.Middleware(mux)
 }
 
-func newTestService(t *testing.T, publicURL string) (*Service, []byte, *clock) {
+func newTestService(t *testing.T, publicURL string) (*Service, string, *clock) {
 	clk := newClock()
-	key, err := LoadOrCreateKey(tempKeyPath(t))
+	secret, err := LoadOrCreateKey(tempKeyPath(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,12 +241,12 @@ func newTestService(t *testing.T, publicURL string) (*Service, []byte, *clock) {
 	}
 	t.Cleanup(func() { store.Close() })
 	s := mustService(t, Config{
-		Key:       key,
+		Key:       secret,
 		Sessions:  store,
 		PublicURL: publicURL,
 		Now:       clk.now,
 	})
-	return s, key, clk
+	return s, secret, clk
 }
 
 // doJSON issues a request with optional JSON body and returns status + decoded body.
@@ -249,70 +293,33 @@ func dataOf(body map[string]interface{}) map[string]interface{} {
 	return map[string]interface{}{}
 }
 
-func TestLoginFlow(t *testing.T) {
-	s, key, clk := newTestService(t, "")
-	clk.advance(0)
-	h := authTestMux(t, s)
-	display := DisplayKey(key)
-
-	// Correct login (same-origin).
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"key":"`+display+`","remember":true}`))
+// login posts the secret to the login endpoint and returns the session cookie
+// and the session-bound CSRF token from the same response.
+func login(t *testing.T, h http.Handler, secret string, remember bool) (cookie, csrf string) {
+	t.Helper()
+	payload := `{"key":"` + secret + `","remember":` + boolStr(remember) + `}`
+	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(payload))
 	req.Header.Set("Origin", "https://zlt.test")
 	req.Host = "zlt.test"
 	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != 200 {
-		t.Fatalf("login status: %d", rec.Code)
+		t.Fatalf("login status: %d (body %s)", rec.Code, rec.Body.String())
 	}
-	cookie := extractCookie(rec)
-	if cookie == "" {
-		t.Fatal("login did not set cookie")
+	cookie = extractCookie(rec)
+	csrf, err := decodeLoginBody(rec.Body.String())
+	if err != nil || csrf == "" {
+		t.Fatalf("login did not return csrf token: %v (body %s)", err, rec.Body.String())
 	}
-	csrf, _ := decodeLoginBody(rec.Body.String())
-	if csrf == "" {
-		t.Fatal("login did not return csrf token")
-	}
+	return cookie, csrf
+}
 
-	// Session status with the cookie.
-	code, data := doJSON(t, h, "GET", "/api/auth/session", "", cookie, "")
-	if code != 200 || dataOf(data)["authenticated"] != true {
-		t.Fatalf("session check: %d %v", code, data)
+func boolStr(b bool) string {
+	if b {
+		return "true"
 	}
-
-	// Touch requires CSRF; without it → 403.
-	code, _ = doJSON(t, h, "POST", "/api/auth/touch", "", cookie, "")
-	if code != 403 {
-		t.Fatalf("touch without csrf: %d, want 403", code)
-	}
-	// With CSRF → 200 and refreshed cookie.
-	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest("POST", "/api/auth/touch", nil)
-	req2.Header.Set("Origin", "https://zlt.test")
-	req2.Host = "zlt.test"
-	req2.Header.Set("Cookie", CookieName+"="+cookie)
-	req2.Header.Set(CSRFHeader, csrf)
-	h.ServeHTTP(rec2, req2)
-	if rec2.Code != 200 {
-		t.Fatalf("touch status: %d", rec2.Code)
-	}
-
-	// Logout with CSRF.
-	rec3 := httptest.NewRecorder()
-	req3 := httptest.NewRequest("POST", "/api/auth/logout", nil)
-	req3.Header.Set("Origin", "https://zlt.test")
-	req3.Host = "zlt.test"
-	req3.Header.Set("Cookie", CookieName+"="+cookie)
-	req3.Header.Set(CSRFHeader, csrf)
-	h.ServeHTTP(rec3, req3)
-	if rec3.Code != 200 {
-		t.Fatalf("logout status: %d", rec3.Code)
-	}
-	// After logout, the session is gone.
-	code, data = doJSON(t, h, "GET", "/api/auth/session", "", cookie, "")
-	if dataOf(data)["authenticated"] == true {
-		t.Fatalf("session still authenticated after logout: %v", data)
-	}
+	return "false"
 }
 
 func decodeLoginBody(body string) (string, error) {
@@ -328,9 +335,61 @@ func decodeLoginBody(body string) (string, error) {
 	return "", nil
 }
 
+func TestLoginFlow(t *testing.T) {
+	s, secret, clk := newTestService(t, "")
+	clk.advance(0)
+	h := authTestMux(s)
+
+	cookie, csrf := login(t, h, secret, true)
+	if cookie == "" || csrf == "" {
+		t.Fatal("login did not set cookie or csrf token")
+	}
+
+	// Session status with the cookie.
+	code, data := doJSON(t, h, "GET", "/api/auth/session", "", cookie, "")
+	if code != 200 || dataOf(data)["authenticated"] != true {
+		t.Fatalf("session check: %d %v", code, data)
+	}
+
+	// Touch requires CSRF; without it → 403.
+	code, _ = doJSON(t, h, "POST", "/api/auth/touch", "", cookie, "")
+	if code != 403 {
+		t.Fatalf("touch without csrf: %d, want 403", code)
+	}
+
+	// Touch with CSRF → 200.
+	rec3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest("POST", "/api/auth/touch", nil)
+	req3.Header.Set("Origin", "https://zlt.test")
+	req3.Host = "zlt.test"
+	req3.Header.Set("Cookie", CookieName+"="+cookie)
+	req3.Header.Set(CSRFHeader, csrf)
+	h.ServeHTTP(rec3, req3)
+	if rec3.Code != 200 {
+		t.Fatalf("touch status: %d", rec3.Code)
+	}
+
+	// Logout with CSRF.
+	rec4 := httptest.NewRecorder()
+	req4 := httptest.NewRequest("POST", "/api/auth/logout", nil)
+	req4.Header.Set("Origin", "https://zlt.test")
+	req4.Host = "zlt.test"
+	req4.Header.Set("Cookie", CookieName+"="+cookie)
+	req4.Header.Set(CSRFHeader, csrf)
+	h.ServeHTTP(rec4, req4)
+	if rec4.Code != 200 {
+		t.Fatalf("logout status: %d", rec4.Code)
+	}
+	// After logout, the session is gone.
+	code, data = doJSON(t, h, "GET", "/api/auth/session", "", cookie, "")
+	if dataOf(data)["authenticated"] == true {
+		t.Fatalf("session still authenticated after logout: %v", data)
+	}
+}
+
 func TestLoginWrongKeyAndRateLimit(t *testing.T) {
 	s, _, _ := newTestService(t, "")
-	h := authTestMux(t, s)
+	h := authTestMux(s)
 
 	for i := 0; i < 5; i++ {
 		code, _ := doJSON(t, h, "POST", "/api/auth/login", `{"key":"wrong","remember":false}`, "", "")
@@ -346,11 +405,10 @@ func TestLoginWrongKeyAndRateLimit(t *testing.T) {
 }
 
 func TestLoginCrossOrigin(t *testing.T) {
-	s, key, _ := newTestService(t, "")
-	h := authTestMux(t, s)
-	display := DisplayKey(key)
+	s, secret, _ := newTestService(t, "")
+	h := authTestMux(s)
 
-	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"key":"`+display+`","remember":false}`))
+	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"key":"`+secret+`","remember":false}`))
 	req.Header.Set("Origin", "https://evil.test")
 	req.Host = "zlt.test"
 	req.Header.Set("Content-Type", "application/json")
@@ -365,7 +423,7 @@ func TestLoginCrossOrigin(t *testing.T) {
 
 func TestMiddlewareAnonymousBlocked(t *testing.T) {
 	s, _, _ := newTestService(t, "")
-	h := authTestMux(t, s)
+	h := authTestMux(s)
 	code, _ := doJSON(t, h, "GET", "/api/tasks", "", "", "")
 	if code != 401 {
 		t.Fatalf("anonymous business request: %d, want 401", code)
@@ -373,19 +431,10 @@ func TestMiddlewareAnonymousBlocked(t *testing.T) {
 }
 
 func TestMiddlewareStateChangingRequiresCSRF(t *testing.T) {
-	s, key, _ := newTestService(t, "")
-	h := authTestMux(t, s)
-	display := DisplayKey(key)
+	s, secret, _ := newTestService(t, "")
+	h := authTestMux(s)
 
-	// Log in to get a cookie + csrf.
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"key":"`+display+`","remember":true}`))
-	req.Header.Set("Origin", "https://zlt.test")
-	req.Host = "zlt.test"
-	req.Header.Set("Content-Type", "application/json")
-	h.ServeHTTP(rec, req)
-	cookie := extractCookie(rec)
-	csrf, _ := decodeLoginBody(rec.Body.String())
+	cookie, csrf := login(t, h, secret, true)
 
 	// POST /api/tasks without CSRF → 403.
 	code, _ := doJSON(t, h, "POST", "/api/tasks", `{}`, cookie, "")
@@ -407,12 +456,11 @@ func TestMiddlewareStateChangingRequiresCSRF(t *testing.T) {
 // Idle 7-day boundary: a session untouched past the window cannot be revived
 // by a touch, and the middleware treats it as anonymous (401).
 func TestSessionIdleExpiry(t *testing.T) {
-	s, key, clk := newTestService(t, "")
-	h := authTestMux(t, s)
-	display := DisplayKey(key)
+	s, secret, clk := newTestService(t, "")
+	h := authTestMux(s)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"key":"`+display+`","remember":true}`))
+	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"key":"`+secret+`","remember":true}`))
 	req.Header.Set("Origin", "https://zlt.test")
 	req.Host = "zlt.test"
 	req.Header.Set("Content-Type", "application/json")
@@ -444,7 +492,7 @@ func TestSessionIdleExpiry(t *testing.T) {
 // ---- Public URL validation ----
 
 func TestPublicURLValidation(t *testing.T) {
-	key := make([]byte, keySize)
+	key := "some-access-key-string"
 	store, err := NewSessionStore(tempSessionPath(t))
 	if err != nil {
 		t.Fatal(err)
@@ -452,16 +500,16 @@ func TestPublicURLValidation(t *testing.T) {
 	defer store.Close()
 
 	cases := []struct {
-		url  string
-		ok   bool
+		url string
+		ok  bool
 	}{
-		{"", true},                         // local HTTP: no public URL
-		{"https://zlt.example", true},      // valid https root
-		{"http://zlt.example", false},      // not https
-		{"https://zlt.example/admin", false}, // path not allowed
+		{"", true},                            // local HTTP: no public URL
+		{"https://zlt.example", true},         // valid https root
+		{"http://zlt.example", false},         // not https
+		{"https://zlt.example/admin", false},  // path not allowed
 		{"https://user:pass@zlt.example", false}, // userinfo not allowed
-		{"https://zlt.example?x=1", false}, // query not allowed
-		{"https://zlt.example#/frag", false}, // fragment not allowed
+		{"https://zlt.example?x=1", false},    // query not allowed
+		{"https://zlt.example#/frag", false},  // fragment not allowed
 		{"not a url", false},
 	}
 	for _, c := range cases {

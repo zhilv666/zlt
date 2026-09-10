@@ -112,9 +112,11 @@ func handleAlreadyRunning(lockPath string, opts RunOptions) error {
 }
 
 // initAuth loads (or generates) the access key, opens the session database and
-// constructs the auth Service. A failure here is startup-fatal: a missing or
-// corrupt key is never silently replaced, and a bad public URL is rejected
-// rather than silently downgrading to insecure cookies.
+// constructs the auth Service. The access key is stored verbatim as text in
+// data/auth.key — either the auto-generated random string or a passphrase set
+// via `zlt auth set`. A failure here is startup-fatal: an empty or unreadable
+// key file is never silently replaced, and a bad public URL is rejected rather
+// than silently downgrading to insecure cookies.
 func initAuth() (svc *auth.Service, keyPath string, sessions *auth.SessionStore, err error) {
 	keyPath = filepath.Join("data", "auth.key")
 	key, err := auth.LoadOrCreateKey(keyPath)

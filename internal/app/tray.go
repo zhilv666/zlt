@@ -178,8 +178,9 @@ func (c *trayController) initVersionMenu() {
 }
 
 // openKeyFile opens the access-key file in notepad so the operator can read the
-// base64url string and paste it into the browser login form. GUI release builds
-// have no console, so this is the only way to surface the key on Windows.
+// access key (random string or manually set passphrase) and paste it into the
+// browser login form. GUI release builds have no console, so this is the only
+// way to surface the key on Windows.
 func openKeyFile(path string) {
 	if path == "" {
 		return

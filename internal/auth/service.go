@@ -18,7 +18,7 @@ const CSRFHeader = "X-CSRF-Token"
 
 // Config configures the auth Service.
 type Config struct {
-	Key            []byte
+	Key            string
 	Sessions       *SessionStore
 	PublicURL      string   // "" (local HTTP) or a https root, e.g. https://zlt.example
 	TrustedProxies []string // additional trusted proxy CIDRs/IPs; loopback is always trusted
@@ -29,7 +29,7 @@ type Config struct {
 // key, the session store and the login rate limiter, and exposes the unified
 // middleware plus the four auth endpoints.
 type Service struct {
-	key            []byte
+	key            string
 	fingerprint    string
 	sessions       *SessionStore
 	secureCookies  bool
@@ -69,7 +69,7 @@ func NewService(cfg Config) (*Service, error) {
 
 	return &Service{
 		key:           cfg.Key,
-		fingerprint:   KeyFingerprint(cfg.Key),
+		fingerprint:   Fingerprint(cfg.Key),
 		sessions:      cfg.Sessions,
 		secureCookies: secure,
 		publicURL:     publicURL,
