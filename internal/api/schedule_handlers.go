@@ -17,6 +17,7 @@ type ScheduleManager interface {
 	SetScheduleEnabled(string, bool) error
 	RunScheduleNow(string) (task.ScheduleRunResult, error)
 	ScheduleNextRun(string) (time.Time, bool)
+	ReorderSchedules(ids, baseIDs []string) error
 }
 
 type scheduleItem struct {
@@ -56,6 +57,33 @@ func (s *Server) handleSchedules(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
 	}
+}
+
+// handleSchedulesReorder persists a new schedule order. See handleTasksReorder
+// for the ids/base_ids contract.
+func (s *Server) handleSchedulesReorder(w http.ResponseWriter, r *http.Request) {
+	if s.schedulesUnavailable(w) {
+		return
+	}
+	if r.Method != http.MethodPut {
+		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+		return
+	}
+
+	var payload struct {
+		IDs     []string `json:"ids"`
+		BaseIDs []string `json:"base_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: "invalid json"})
+		return
+	}
+
+	if err := s.schedules.ReorderSchedules(payload.IDs, payload.BaseIDs); err != nil {
+		writeReorderError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response{Code: 0, Msg: "reordered"})
 }
 
 func (s *Server) handleScheduleAction(w http.ResponseWriter, r *http.Request) {

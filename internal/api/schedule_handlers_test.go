@@ -55,6 +55,8 @@ func (m *testScheduleManager) ScheduleNextRun(id string) (time.Time, bool) {
 	return m.nextRun, m.hasNextRun
 }
 
+func (m *testScheduleManager) ReorderSchedules(ids, baseIDs []string) error { return nil }
+
 func newScheduleTestServer(m *testScheduleManager) *Server {
 	return NewServer(
 		testRuntime{tasks: []task.Config{{ID: "demo", Name: "Demo", Program: "demo.exe"}}},

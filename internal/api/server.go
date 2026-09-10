@@ -14,6 +14,7 @@ import (
 	"time"
 
 	rootassets "zhulingtai"
+	"zhulingtai/internal/auth"
 	"zhulingtai/internal/buildinfo"
 	"zhulingtai/internal/logging"
 	"zhulingtai/internal/process"
@@ -27,6 +28,7 @@ type Runtime interface {
 	RestartTask(string) error
 	ExportTasks() []task.Config
 	ReplaceTasks([]task.Config) error
+	ReorderTasks(ids, baseIDs []string) error
 }
 
 type ProcessManager interface {
@@ -43,6 +45,7 @@ type Server struct {
 	autostart AutoStartManager
 	schedules ScheduleManager
 	settings  SettingsManager
+	auth      *auth.Service
 }
 
 type AutoStartManager interface {
@@ -71,6 +74,13 @@ type response struct {
 	Data interface{} `json:"data,omitempty"`
 }
 
+// Reorder error sentinels. Implementations (app.Runtime) return these so the
+// HTTP handlers can map them to the right status code without importing app.
+var (
+	ErrReorderInvalid  = errors.New("invalid reorder request")
+	ErrReorderConflict = errors.New("list changed since drag started")
+)
+
 type taskItem struct {
 	Task   task.Config          `json:"task"`
 	Status process.RuntimeState `json:"status"`
@@ -86,9 +96,28 @@ func NewServer(runtime Runtime, manager ProcessManager, autostart AutoStartManag
 	}
 }
 
+// WithAuth attaches the browser-auth service. When set, Handler() mounts the
+// auth endpoints and wraps every business route behind the unified middleware.
+// Tests leave it nil so they can exercise handlers directly (middleware no-op).
+func (s *Server) WithAuth(svc *auth.Service) *Server {
+	s.auth = svc
+	return s
+}
+
+// Auth returns the attached auth service, or nil when auth is disabled.
+func (s *Server) Auth() *auth.Service { return s.auth }
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
+
+	if s.auth != nil {
+		mux.HandleFunc("/api/auth/login", s.auth.HandleLogin)
+		mux.HandleFunc("/api/auth/session", s.auth.HandleSession)
+		mux.HandleFunc("/api/auth/touch", s.auth.HandleTouch)
+		mux.HandleFunc("/api/auth/logout", s.auth.HandleLogout)
+	}
+
 	mux.HandleFunc("/api/build-info", s.handleBuildInfo)
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/system-log", s.handleSystemLog)
@@ -102,8 +131,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/tasks/", s.handleTaskAction)
 	mux.HandleFunc("/api/tasks-export", s.handleTasksExport)
 	mux.HandleFunc("/api/tasks-import", s.handleTasksImport)
+	mux.HandleFunc("/api/tasks-order", s.handleTasksReorder)
 	mux.HandleFunc("/api/schedules", s.handleSchedules)
 	mux.HandleFunc("/api/schedules/", s.handleScheduleAction)
+	mux.HandleFunc("/api/schedules-order", s.handleSchedulesReorder)
+
+	if s.auth != nil {
+		return s.auth.Middleware(mux)
+	}
 	return mux
 }
 
@@ -319,6 +354,72 @@ func (s *Server) handleTasksImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response{Code: 0, Msg: "imported"})
 }
 
+// handleTasksReorder persists a new task order. The body carries the complete
+// target order (ids) and the order before the drag (base_ids) for optimistic
+// concurrency: if another change landed between drag-start and save, the
+// server rejects with 409 so the client can reload and retry.
+func (s *Server) handleTasksReorder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
+		return
+	}
+
+	var payload struct {
+		IDs     []string `json:"ids"`
+		BaseIDs []string `json:"base_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: "invalid json"})
+		return
+	}
+
+	if err := s.runtime.ReorderTasks(payload.IDs, payload.BaseIDs); err != nil {
+		writeReorderError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response{Code: 0, Msg: "reordered"})
+}
+
+func writeReorderError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrReorderInvalid):
+		writeJSON(w, http.StatusBadRequest, response{Code: 1, Msg: err.Error()})
+	case errors.Is(err, ErrReorderConflict):
+		writeJSON(w, http.StatusConflict, response{Code: 1, Msg: err.Error()})
+	default:
+		writeJSON(w, http.StatusInternalServerError, response{Code: 1, Msg: err.Error()})
+	}
+}
+
+// sseKeepaliveInterval is how often long-lived SSE connections emit a comment
+// line (": keepalive\n\n"). Reverse proxies time out idle connections; the
+// comment is ignored by EventSource clients but keeps the wire warm. It does
+// not renew the session — only /api/auth/touch does.
+const sseKeepaliveInterval = 15 * time.Second
+
+// sseGuard checks session liveness and emits keepalive comments for long-lived
+// SSE connections. It returns false (after sending an auth-failed event) when
+// the session has expired or been revoked, signalling the caller to close.
+// When auth is disabled (nil), it only emits keepalive.
+func (s *Server) sseGuard(w http.ResponseWriter, r *http.Request, lastKeepalive *time.Time) bool {
+	if s.auth != nil && !s.auth.IsSessionLive(r) {
+		_ = writeSSEEvent(w, "auth-failed", []byte(`{"msg":"session expired"}`))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		return false
+	}
+	now := time.Now()
+	if now.Sub(*lastKeepalive) >= sseKeepaliveInterval {
+		_, _ = w.Write([]byte(": keepalive\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		*lastKeepalive = now
+	}
+	return true
+}
+
 func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, response{Code: 1, Msg: "method not allowed"})
@@ -339,8 +440,14 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	var lastPayload []byte
+	var (
+		lastPayload   []byte
+		lastKeepalive = time.Now()
+	)
 	for {
+		if !s.sseGuard(w, r, &lastKeepalive) {
+			return
+		}
 		payload, err := json.Marshal(s.buildTaskItems())
 		if err != nil {
 			return
@@ -544,10 +651,14 @@ func (s *Server) handleGenericLogStream(w http.ResponseWriter, r *http.Request, 
 	}
 
 	var (
-		lastPayload []byte
-		lastSize    int64 = -1
+		lastPayload   []byte
+		lastSize      int64 = -1
+		lastKeepalive       = time.Now()
 	)
 	for {
+		if !s.sseGuard(w, r, &lastKeepalive) {
+			return
+		}
 		if size := logging.FileSize(logPath); size != lastSize {
 			lastSize = size
 

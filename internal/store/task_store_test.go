@@ -90,3 +90,74 @@ func TestTaskStoreBootstrapsFromLegacyJSON(t *testing.T) {
 		t.Fatalf("unexpected bootstrapped tasks: %+v", tasks)
 	}
 }
+
+// TestTaskStoreSaveRollsBackOnLoopFailure guards the transaction rollback fix.
+// The DELETE runs before the insert loop; an insert failure mid-loop must roll
+// the whole transaction back so the committed baseline is preserved, the failed
+// connection is returned to the pool, and a subsequent valid save still works.
+// Before the fix, the loop-local err (declared with :=) shadowed the outer err
+// that the deferred rollback checked, so mid-loop failures skipped rollback and
+// leaked a connection per failed save.
+func TestTaskStoreSaveRollsBackOnLoopFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewTaskStore(filepath.Join(dir, "tasks.db"), filepath.Join(dir, "tasks.json"))
+	if err != nil {
+		t.Fatalf("new task store: %v", err)
+	}
+	defer store.Close()
+
+	baseline := []task.Config{
+		{ID: "keep", Name: "Keep", Program: "k.exe", Args: []string{}, WorkDir: ".", Env: []string{}, StopTimeoutSec: 8},
+	}
+	if err := store.Save(baseline); err != nil {
+		t.Fatalf("baseline save: %v", err)
+	}
+
+	// Duplicate primary key triggers a stmt.Exec error after DELETE has run.
+	dup := []task.Config{
+		{ID: "x", Name: "X1", Program: "x.exe", Args: []string{}, WorkDir: ".", Env: []string{}, StopTimeoutSec: 8},
+		{ID: "x", Name: "X2", Program: "x2.exe", Args: []string{}, WorkDir: ".", Env: []string{}, StopTimeoutSec: 8},
+	}
+	if err := store.Save(dup); err == nil {
+		t.Fatal("expected duplicate-id save to fail, got nil")
+	}
+
+	// Rollback must restore the committed baseline unchanged.
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("load after failed save: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].ID != "keep" {
+		t.Fatalf("rollback did not restore baseline: %+v", loaded)
+	}
+
+	// Repeated failed saves must not leak connections: the fix rolls back and
+	// returns each tx connection to the pool. The old code skipped rollback,
+	// pinning one connection per failed save.
+	before := store.db.Stats().OpenConnections
+	for i := 0; i < 4; i++ {
+		if saveErr := store.Save(dup); saveErr == nil {
+			t.Fatalf("iteration %d: expected failure, got nil", i)
+		}
+	}
+	after := store.db.Stats().OpenConnections
+	if after > before+2 {
+		t.Fatalf("failed saves leaked connections (rollback skipped): before=%d after=%d", before, after)
+	}
+
+	// After failure, a valid save must still succeed.
+	next := []task.Config{
+		{ID: "keep", Name: "Keep", Program: "k.exe", Args: []string{}, WorkDir: ".", Env: []string{}, StopTimeoutSec: 8},
+		{ID: "more", Name: "More", Program: "m.exe", Args: []string{}, WorkDir: ".", Env: []string{}, StopTimeoutSec: 8},
+	}
+	if err := store.Save(next); err != nil {
+		t.Fatalf("resave after failure: %v", err)
+	}
+	loaded, err = store.Load()
+	if err != nil {
+		t.Fatalf("reload after resave: %v", err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("resave state: %+v", loaded)
+	}
+}
