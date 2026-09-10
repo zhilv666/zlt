@@ -298,16 +298,17 @@ func parseServiceCommandArgs(args []string) (RunOptions, error) {
 	return opts, nil
 }
 
-// authCommand implements `zlt auth show` and `zlt auth reset`.
+// authCommand implements `zlt auth show`, `zlt auth reset` and `zlt auth set`.
 //
-//   show   — prints the base64url access key stored in data/auth.key, so the
-//            operator can paste it into the browser login. Works whether or not
-//            the service is running.
-//   reset  — deletes the key file and the session database so the next start
-//            generates a fresh key. Requires the instance to be stopped (a
-//            running instance would just rewrite the old key on its next
-//            restart anyway, and deleting under it leaves stale sessions).
-//            Supports --pid-file to target a non-default instance.
+//   show  — prints the access key stored in data/auth.key, so it can be pasted
+//           into the browser login form. Works whether or not the service is
+//           running.
+//   reset — deletes the key file and the session database so the next start
+//           generates a fresh random key. Requires the instance to be stopped.
+//   set   — writes a manually chosen access key (a plain passphrase) to
+//           data/auth.key and drops the session database. Requires the
+//           instance to be stopped.
+//   Both reset and set accept --pid-file to target a non-default instance.
 func authCommand(args []string) error {
 	if len(args) == 0 || isHelpArg(args[0]) {
 		fmt.Print(authHelpText())
@@ -320,21 +321,27 @@ func authCommand(args []string) error {
 		return authShowCommand(rest)
 	case "reset":
 		return authResetCommand(rest)
+	case "set":
+		return authSetCommand(rest)
 	default:
-		return fmt.Errorf("unknown auth subcommand: %s\n\n%s", sub, authHelpText())
+		return fmt.Errorf("unknown auth subcommand: %s", sub)
 	}
 }
 
 func authShowCommand(args []string) error {
+	help := false
 	for _, a := range args {
 		if isHelpArg(a) {
-			fmt.Print(authHelpText())
-			return nil
+			help = true
+			continue
 		}
 		return fmt.Errorf("unknown argument: %s", a)
 	}
-	keyPath := filepath.Join("data", "auth.key")
-	display, err := auth.ReadKeyFile(keyPath)
+	if help {
+		fmt.Print(authHelpText())
+		return nil
+	}
+	display, err := auth.ReadKeyFile(filepath.Join("data", "auth.key"))
 	if err != nil {
 		return err
 	}
@@ -342,23 +349,43 @@ func authShowCommand(args []string) error {
 	return nil
 }
 
-func authResetCommand(args []string) error {
-	pidFile := defaultPIDFile()
+// parseAuthChangeArgs parses --pid-file plus an optional single positional key
+// value, shared by `auth reset` (no value) and `auth set` (exactly one value).
+func parseAuthChangeArgs(args []string) (pidFile, value string, help bool, err error) {
+	pidFile = defaultPIDFile()
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--pid-file":
 			if i+1 >= len(args) {
-				return errors.New("missing value for --pid-file")
+				return "", "", false, errors.New("missing value for --pid-file")
 			}
 			pidFile = args[i+1]
 			i++
 		default:
 			if isHelpArg(args[i]) {
-				fmt.Print(authHelpText())
-				return nil
+				help = true
+				continue
 			}
-			return fmt.Errorf("unknown argument: %s", args[i])
+			if strings.HasPrefix(args[i], "-") {
+				return "", "", false, fmt.Errorf("unknown argument: %s", args[i])
+			}
+			if value != "" {
+				return "", "", false, errors.New("auth set accepts exactly one key value")
+			}
+			value = args[i]
 		}
+	}
+	return pidFile, value, help, nil
+}
+
+func authResetCommand(args []string) error {
+	pidFile, _, help, err := parseAuthChangeArgs(args)
+	if err != nil {
+		return err
+	}
+	if help {
+		fmt.Print(authHelpText())
+		return nil
 	}
 
 	// The instance must be stopped: resetting the key while it is running would
@@ -366,9 +393,9 @@ func authResetCommand(args []string) error {
 	// browsers unable to tell until a restart.
 	if lock, err := readPIDFile(pidFile); err == nil {
 		if processMatches(lock.PID, lock.Exe) {
-			return fmt.Errorf("驻令台 正在运行 (pid %d)，请先停止后再重置密钥", lock.PID)
+			return fmt.Errorf("instance is running (pid %d); stop it before resetting the access key", lock.PID)
 		}
-		_ = os.Remove(pidFile)
+		_ = os.Remove(pidFile) // stale lock left by an unclean exit
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -381,23 +408,65 @@ func authResetCommand(args []string) error {
 	if err := os.Remove(filepath.Join("data", "auth.db")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	fmt.Println("访问密钥已重置。下次启动将生成新密钥，所有已登录浏览器需要重新登录。")
+	fmt.Println("Access key reset. A new random key will be generated on the next start.")
+	return nil
+}
+
+func authSetCommand(args []string) error {
+	pidFile, value, help, err := parseAuthChangeArgs(args)
+	if err != nil {
+		return err
+	}
+	if help {
+		fmt.Print(authHelpText())
+		return nil
+	}
+	if value == "" {
+		return errors.New("missing access key value")
+	}
+
+	// Same running-instance guard as reset: writing a key under a live process
+	// would leave the in-memory key out of sync until a restart.
+	if lock, err := readPIDFile(pidFile); err == nil {
+		if processMatches(lock.PID, lock.Exe) {
+			return fmt.Errorf("instance is running (pid %d); stop it before setting the access key", lock.PID)
+		}
+		_ = os.Remove(pidFile) // stale lock left by an unclean exit
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	if err := auth.WriteKeyFile(filepath.Join("data", "auth.key"), value); err != nil {
+		return err
+	}
+	// Drop sessions so every logged-in browser must re-authenticate with the
+	// new key.
+	if err := os.Remove(filepath.Join("data", "auth.db")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	fmt.Println("Access key set. All logged-in browsers must sign in again.")
 	return nil
 }
 
 func authHelpText() string {
-	return `zlt auth — 访问密钥管理
+	return `zlt auth - Manage the browser access key
 
-用法:
+Usage:
   zlt auth show
-    打印 data/auth.key 中保存的访问密钥（浏览器登录时输入）
-
   zlt auth reset [--pid-file <path>]
-    删除密钥文件和会话数据库，下次启动生成新密钥
-    要求对应实例已停止
+  zlt auth set [--pid-file <path>] <key>
 
-参数:
-  --pid-file
-    指定进程状态/单例锁文件路径 (默认 data/zlt.pid)
+Commands:
+  show    Print the current access key (data/auth.key)
+  reset   Delete the key and sessions; a new random key is generated on next start
+  set     Store a manually chosen key (plain passphrase, at least 8 characters)
+
+Options:
+  -h, --help          Show this help and exit
+  --pid-file <path>   Single-instance lock / status file (default: data/zlt.pid)
+
+Notes:
+  reset and set require the instance to be stopped first.
+  set writes the key verbatim; on next start it becomes the login passphrase.
 `
 }
