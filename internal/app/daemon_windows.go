@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -72,13 +74,20 @@ func stopDetached(pidFile string) error {
 		return err
 	}
 
-	proc, err := os.FindProcess(lock.PID)
-	if err != nil {
-		return err
-	}
-	if err := proc.Signal(os.Interrupt); err != nil {
+	// A lock whose process is gone (or whose pid was recycled by an unrelated
+	// program) is stale: clear it and treat the stop as already done.
+	if !processMatches(lock.PID, lock.Exe) {
 		_ = os.Remove(pidFile)
-		return os.ErrNotExist
+		return nil
+	}
+
+	// Windows cannot deliver os.Interrupt to another process — os/exec supports
+	// only Kill there — so the detached daemon cannot be asked to shut down
+	// gracefully. Terminating the whole tree mirrors how managed tasks are
+	// force-stopped (internal/process) and also reaps the task children the
+	// daemon would otherwise leave running.
+	if err := taskkillProcessTree(lock.PID); err != nil {
+		return err
 	}
 
 	for i := 0; i < 40; i++ {
@@ -90,4 +99,22 @@ func stopDetached(pidFile string) error {
 	}
 
 	return fmt.Errorf("service pid %d did not stop in time", lock.PID)
+}
+
+// taskkillProcessTree force-terminates pid and its descendants via taskkill,
+// the same tool internal/process uses to stop managed tasks on Windows.
+func taskkillProcessTree(pid int) error {
+	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: createNoWindow,
+		HideWindow:    true,
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if msg := strings.TrimSpace(string(output)); msg != "" {
+			return fmt.Errorf("taskkill failed: %s", msg)
+		}
+		return err
+	}
+	return nil
 }
