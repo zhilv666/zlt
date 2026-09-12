@@ -253,7 +253,7 @@ Commands:
   stop                Stop the background service
   restart             Restart the background service
   status              Show whether the service is running
-  autostart           Manage auto-start at login
+  autostart           Manage auto-start (system-wide for root/sudo, user-level otherwise)
   auth                Manage the browser access key
   version             Print build and version details
 
