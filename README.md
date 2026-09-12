@@ -217,12 +217,18 @@ Linux 无界面模式：
 ./bin/zlt-linux-amd64 start --addr 0.0.0.0:3719
 ```
 
-Linux 软件开机自启：
+Linux 软件开机自启（普通用户使用用户级，root / sudo 使用系统级）：
 
 ```sh
+# 普通用户：写入 ~/.config/systemd/user/zhulingtai.service，通过 systemctl --user 管理
 ./bin/zlt-linux-amd64 autostart enable
 ./bin/zlt-linux-amd64 autostart status
 ./bin/zlt-linux-amd64 autostart disable
+
+# root 或 sudo：写入 /etc/systemd/system/zhulingtai.service，通过 systemctl 管理，开机自启
+sudo ./bin/zlt-linux-amd64 autostart enable
+sudo ./bin/zlt-linux-amd64 autostart status
+sudo ./bin/zlt-linux-amd64 autostart disable
 ```
 
 访问密钥管理：
