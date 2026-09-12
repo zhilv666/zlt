@@ -2,6 +2,20 @@
 
 本文件集中记录驻令台各版本的重要变化。后续正式版本发布时，GitHub Actions 会自动将新版本内容插入到文件顶部。
 
+## v0.3.1 (2026-09-12)
+
+### Features
+
+- ✨ feat(app): Linux 开机自启按权限选择用户级或系统级 (2be2a8f)
+
+### Fixes
+
+- 🐛 fix(app): 修复 Windows 下 stop/restart 无法停止后台进程 (cd664b2)
+
+### Documentation
+
+- 📝 docs(changelog): 更新 v0.3.0 变更日志 [skip ci] (3430e8a)
+
 ## v0.3.0 (2026-09-10)
 
 ### Features
