@@ -2,6 +2,16 @@
 
 本文件集中记录驻令台各版本的重要变化。后续正式版本发布时，GitHub Actions 会自动将新版本内容插入到文件顶部。
 
+## v0.3.2 (2026-10-16)
+
+### Features
+
+- ✨ feat(release): 发布产物新增 arm64 架构 (e0cd769)
+
+### Documentation
+
+- 📝 docs(changelog): 更新 v0.3.1 变更日志 [skip ci] (e12013f)
+
 ## v0.3.1 (2026-09-12)
 
 ### Features
