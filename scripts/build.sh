@@ -16,6 +16,7 @@ COMMIT=$(git -c safe.directory="$REPO_DIR" rev-parse --short HEAD | tr -d '\r')
 BUILD_TIME=$(date +"%Y-%m-%dT%H:%M:%S%z")
 BUILD_PROFILE="release"
 HOST_OS="$(go env GOOS)"
+HOST_ARCH="$(go env GOARCH)"
 ICON_PATH="./ico.ico"
 RSRC_SYSO="./cmd/zlt/rsrc_windows_${TARGET_ARCH}.syso"
 
@@ -60,7 +61,10 @@ if [ "$TARGET_OS" = "windows" ] && [ -f "$ICON_PATH" ]; then
   if [ "$HOST_OS" = "windows" ] && [ -x "./.tools/rsrc.exe" ]; then
     ./.tools/rsrc.exe -ico "$ICON_PATH" -arch "$TARGET_ARCH" -o "$RSRC_SYSO"
   else
-    go run github.com/akavel/rsrc@v0.10.2 -ico "$ICON_PATH" -arch "$TARGET_ARCH" -o "$RSRC_SYSO"
+    # 宿主与目标架构可能不同（如 amd64 机器上交叉编译 arm64），rsrc 工具须按宿主架构构建，
+    # 否则会产出无法在当前机器上执行的可执行文件。
+    GOOS="$HOST_OS" GOARCH="$HOST_ARCH" CGO_ENABLED=0 \
+      go run github.com/akavel/rsrc@v0.10.2 -ico "$ICON_PATH" -arch "$TARGET_ARCH" -o "$RSRC_SYSO"
   fi
 fi
 
