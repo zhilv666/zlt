@@ -116,6 +116,12 @@ func processIsAlive(pid int) bool {
 			}
 		}
 	}
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("/bin/ps", "-p", strconv.Itoa(pid), "-o", "stat=").Output()
+		if err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "Z") {
+			return false
+		}
+	}
 	return true
 }
 
@@ -135,7 +141,9 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 		}
 	}
 
-	out, err := exec.Command("ps", "-ax", "-o", "pid=", "-o", "command=").Output()
+	// ps only enumerates PIDs. Identity and argv must come from platform APIs,
+	// since a formatted command line cannot preserve empty or spaced arguments.
+	out, err := exec.Command("ps", "-ax", "-o", "pid=").Output()
 	if err != nil {
 		return 0, false
 	}
@@ -146,46 +154,24 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 			continue
 		}
 
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-
-		pid, err := strconv.Atoi(fields[0])
+		pid, err := strconv.Atoi(line)
 		if err != nil || pid <= 0 {
 			continue
 		}
 
-		if runtime.GOOS == "linux" {
-			// ps flattens argv and loses spaces and empty arguments. /proc keeps
-			// their exact boundaries and exposes the actual executable identity.
-			exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
-			if err != nil || !sameExecutableFile(exe, resolvedProgram) {
-				continue
+		exe, argv, ok := readUnixProcessCommand(pid)
+		if !ok || !sameProcessFile(exe, resolvedProgram) || len(argv) != len(cfg.Args)+1 {
+			continue
+		}
+		matches := true
+		for i, arg := range cfg.Args {
+			if argv[i+1] != arg {
+				matches = false
+				break
 			}
-			data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-			if err != nil {
-				continue
-			}
-			argv := strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00")
-			if len(argv) != len(cfg.Args)+1 {
-				continue
-			}
-			matches := true
-			for i, arg := range cfg.Args {
-				if argv[i+1] != arg {
-					matches = false
-					break
-				}
-			}
-			if !matches {
-				continue
-			}
-		} else {
-			commandLine := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
-			if !commandMatchesTask(commandLine, resolvedProgram, cfg.Args) {
-				continue
-			}
+		}
+		if !matches {
+			continue
 		}
 		if !processMatchesWorkingDir(pid, resolvedWorkdir) {
 			continue
@@ -196,7 +182,7 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 	return 0, false
 }
 
-func sameExecutableFile(left, right string) bool {
+func sameProcessFile(left, right string) bool {
 	if sameExecutable(left, right) {
 		return true
 	}
@@ -213,27 +199,5 @@ func processMatchesWorkingDir(pid int, expected string) bool {
 	if expected == "" {
 		return true
 	}
-	actual, ok := readLinuxProcessWorkingDir(pid)
-	if !ok {
-		return false
-	}
-	return sameWorkingDir(actual, expected)
-}
-
-func readLinuxProcessWorkingDir(pid int) (string, bool) {
-	if pid <= 0 {
-		return "", false
-	}
-
-	cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
-	if err != nil {
-		return "", false
-	}
-	if cwd == "" {
-		return "", false
-	}
-	if abs, err := filepath.Abs(cwd); err == nil {
-		cwd = abs
-	}
-	return cwd, true
+	return unixProcessMatchesWorkingDir(pid, expected)
 }
