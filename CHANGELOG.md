@@ -2,6 +2,27 @@
 
 本文件集中记录驻令台各版本的重要变化。后续正式版本发布时，GitHub Actions 会自动将新版本内容插入到文件顶部。
 
+## v0.3.3 (2026-10-22)
+
+### Fixes
+
+- 🐛 fix(process): 修复 macOS 进程接管与停止回归 (c4dfcb3)
+- 🐛 fix(autostart): 支持 Linux 自定义监听地址并保留已有配置 (3388345)
+- 🐛 fix(web): 保留任务参数的空格与空字符串边界 (3c4fa1a)
+- 🐛 fix(app): 保证任务导入与配置持久化的一致性 (69701bc)
+- 🐛 fix(app): 修复单实例锁竞争与后台停止误杀 (4847c5a)
+- 🐛 fix(process): 修复进程接管、停止与异常重启竞态 (d41d094)
+
+### Documentation
+
+- 📝 docs(readme): 完善安装使用、自启运维与开发说明 (b2c692b)
+- 📝 docs(changelog): 更新 v0.4.0 变更日志 [skip ci] (f415eb0)
+- 📝 docs(changelog): 更新 v0.3.2 变更日志 [skip ci] (3a3789c)
+
+### Maintenance
+
+- ✅ test(process): 等待 Unix 子进程就绪后验证接管身份 (261a434)
+
 ## v0.3.2 (2026-10-16)
 
 ### Features
