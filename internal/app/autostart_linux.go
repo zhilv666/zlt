@@ -69,7 +69,12 @@ func systemdUnitPath(scope autostartScope) (string, error) {
 	return filepath.Join(home, ".config", "systemd", "user", systemdServiceName), nil
 }
 
-func systemdUnitContent(scope autostartScope, workdir, exe string) string {
+func systemdUnitContent(scope autostartScope, workdir, exe string, opts RunOptions) string {
+	// The executable token has no environment expansion; later arguments do.
+	command := systemdQuote(exe, false) + " run --listen " + systemdQuote(opts.Addr, true)
+	if opts.PIDFile != "" {
+		command += " --pid-file " + systemdQuote(opts.PIDFile, true)
+	}
 	return strings.TrimSpace(fmt.Sprintf(`
 [Unit]
 Description=驻令台
@@ -78,17 +83,55 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%s
-ExecStart=%s run
+ExecStart=%s
 Restart=always
 RestartSec=2
 
 [Install]
 WantedBy=%s
-`, workdir, exe, scope.wantedBy())) + "\n"
+`, strings.ReplaceAll(workdir, "%", "%%"), command, scope.wantedBy())) + "\n"
+}
+
+// systemd parses its own C-style quoting, specifiers and environment expansion.
+// Literal paths must survive all three; shell quoting alone is insufficient.
+func systemdQuote(value string, command bool) string {
+	value = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`, "%", "%%").Replace(value)
+	if command {
+		value = strings.ReplaceAll(value, "$", "$$")
+	}
+	return `"` + value + `"`
+}
+
+func writeSystemdUnit(path, content string, update bool) error {
+	if update {
+		return os.WriteFile(path, []byte(content), 0o644)
+	}
+	// Re-enabling an existing unit must preserve manual ExecStart changes and
+	// other service directives. Explicit CLI options request regeneration.
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if os.IsExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = file.WriteString(content)
+	closeErr := file.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
 
 func enableAutostart() error {
-	scope := currentAutostartScope()
+	return enableAutostartWithOptions(DefaultRunOptions(), false)
+}
+
+func enableAutostartWithOptions(opts RunOptions, update bool) error {
+	return enableAutostartInScope(currentAutostartScope(), opts, update)
+}
+
+func enableAutostartInScope(scope autostartScope, opts RunOptions, update bool) error {
 
 	exe, err := os.Executable()
 	if err != nil {
@@ -111,8 +154,11 @@ func enableAutostart() error {
 		autostartLog().Error("enable: getwd failed", "err", err)
 		return err
 	}
+	if strings.ContainsAny(workdir+exe+opts.Addr+opts.PIDFile, "\r\n\x00") {
+		return fmt.Errorf("autostart paths and arguments must not contain newlines or NUL")
+	}
 
-	if err := os.WriteFile(unitPath, []byte(systemdUnitContent(scope, workdir, exe)), 0o644); err != nil {
+	if err := writeSystemdUnit(unitPath, systemdUnitContent(scope, workdir, exe, opts), update); err != nil {
 		autostartLog().Error("enable: write unit failed", "err", err)
 		return err
 	}
@@ -126,6 +172,9 @@ func enableAutostart() error {
 	}
 
 	fmt.Printf("autostart enabled (%s): %s\n", scope.label(), unitPath)
+	if update {
+		fmt.Printf("to apply changes to an already running service: systemctl %s\n", strings.Join(scope.systemctlArgs("restart", systemdServiceName), " "))
+	}
 	return nil
 }
 

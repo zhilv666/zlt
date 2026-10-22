@@ -4,6 +4,8 @@ package app
 
 import "errors"
 
+func enableAutostartWithOptions(_ RunOptions, _ bool) error { return enableAutostart() }
+
 func enableAutostart() error {
 	return errors.New("autostart is currently unsupported on this platform")
 }

@@ -14,6 +14,8 @@ import (
 const windowsRunKeyPath = `Software\Microsoft\Windows\CurrentVersion\Run`
 const windowsAutostartValue = "驻令台"
 
+func enableAutostartWithOptions(_ RunOptions, _ bool) error { return enableAutostart() }
+
 func windowsRunKeyDisplay() string {
 	return filepath.Join("HKCU", "Software", "Microsoft", "Windows", "CurrentVersion", "Run")
 }

@@ -2,7 +2,7 @@ package app
 
 import "zhulingtai/internal/api"
 
-type autoStartAPIAdapter struct{}
+type autoStartAPIAdapter struct{ addr string }
 
 func (autoStartAPIAdapter) Status() (api.AutoStartStatus, error) {
 	status, err := GetAutoStartStatus()
@@ -18,8 +18,12 @@ func (autoStartAPIAdapter) Status() (api.AutoStartStatus, error) {
 	}, nil
 }
 
-func (autoStartAPIAdapter) Enable() error {
-	return EnableAutoStart()
+func (a autoStartAPIAdapter) Enable() error {
+	opts := DefaultRunOptions()
+	if a.addr != "" {
+		opts.Addr = a.addr
+	}
+	return enableAutostartWithOptions(opts, false)
 }
 
 func (autoStartAPIAdapter) Disable() error {
