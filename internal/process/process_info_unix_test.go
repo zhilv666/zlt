@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"zhulingtai/internal/task"
 )
@@ -20,6 +21,8 @@ func TestUnixProcessIdentityAndWorkingDirectory(t *testing.T) {
 	}
 	cfg.WorkDir = workdir
 	cfg.Args = append(cfg.Args, "--", "path with spaces", "", `quoted"value`, "")
+	marker := filepath.Join(t.TempDir(), "started")
+	cfg.Env = append(cfg.Env, "ZLT_REGRESSION_MARKER="+marker)
 	cmd := exec.Command(cfg.Program, cfg.Args...)
 	cmd.Dir = cfg.WorkDir
 	cmd.Env = append(os.Environ(), cfg.Env...)
@@ -27,6 +30,22 @@ func TestUnixProcessIdentityAndWorkingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	// Start returns before the helper is ready; /proc identity may still be
+	// incomplete during exec. Wait for its startup marker before asserting it.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		data, err := os.ReadFile(marker)
+		if err == nil && string(data) == "start\n" {
+			break
+		}
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("helper did not signal readiness")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	exe, argv, ok := readUnixProcessCommand(cmd.Process.Pid)
 	if !ok || !sameProcessFile(exe, cfg.Program) || len(argv) == 0 || !reflect.DeepEqual(argv[1:], cfg.Args) {
 		t.Fatalf("incorrect process identity: exe=%q argv=%q ok=%v", exe, argv, ok)
