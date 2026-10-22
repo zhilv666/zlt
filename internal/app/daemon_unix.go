@@ -67,17 +67,29 @@ func stopDetached(pidFile string) error {
 		return err
 	}
 
+	matches, err := detachedProcessMatches(lock)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		_ = lock.Release()
+		return nil
+	}
 	if err := syscall.Kill(lock.PID, syscall.SIGTERM); err != nil {
 		if err == syscall.ESRCH {
-			_ = os.Remove(pidFile)
+			_ = lock.Release()
 			return os.ErrNotExist
 		}
 		return err
 	}
 
 	for i := 0; i < 40; i++ {
-		if !processExists(lock.PID) {
-			_ = os.Remove(pidFile)
+		matches, err := detachedProcessMatches(lock)
+		if err != nil {
+			return err
+		}
+		if !matches {
+			_ = lock.Release()
 			return nil
 		}
 		time.Sleep(150 * time.Millisecond)

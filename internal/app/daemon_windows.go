@@ -76,8 +76,12 @@ func stopDetached(pidFile string) error {
 
 	// A lock whose process is gone (or whose pid was recycled by an unrelated
 	// program) is stale: clear it and treat the stop as already done.
-	if !processMatches(lock.PID, lock.Exe) {
-		_ = os.Remove(pidFile)
+	matches, err := detachedProcessMatches(lock)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		_ = lock.Release()
 		return nil
 	}
 
@@ -91,8 +95,12 @@ func stopDetached(pidFile string) error {
 	}
 
 	for i := 0; i < 40; i++ {
-		if !processExists(lock.PID) {
-			_ = os.Remove(pidFile)
+		matches, err := detachedProcessMatches(lock)
+		if err != nil {
+			return err
+		}
+		if !matches {
+			_ = lock.Release()
 			return nil
 		}
 		time.Sleep(150 * time.Millisecond)
