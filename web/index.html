@@ -575,6 +575,7 @@
     /* ===== Forms ===== */
     .form-group { margin-bottom: 1.15rem; }
     .form-group:last-child { margin-bottom: 0; }
+	.form-hint { display: block; margin-top: 0.4rem; color: var(--text-muted); font-size: 0.8rem; }
 
     .form-label {
       display: block;
@@ -1601,7 +1602,8 @@
           </div>
           <div class="form-group">
             <label class="form-label" for="task-args">运行参数</label>
-            <input id="task-args" class="form-control" placeholder="例如: server --port 5244">
+            <textarea id="task-args" class="form-control" rows="2" placeholder='例如: ["server", "--port", "5244"]'></textarea>
+            <small class="form-hint">使用 JSON 字符串数组；每项是一个参数，支持空格和空字符串。</small>
           </div>
           <div class="form-group">
             <label class="form-label" for="task-workdir">工作目录</label>
@@ -2428,11 +2430,23 @@
       return status === 'running' || status === 'starting' || status === 'stopping';
     }
 
-    function splitArgs(input) {
-      return String(input || '')
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean);
+    function parseArgs(input) {
+      const text = String(input || '').trim();
+      if (!text) return [];
+      let args;
+      try {
+        args = JSON.parse(text);
+      } catch (_) {
+        throw new Error('运行参数格式错误，请填写 JSON 字符串数组，例如 ["server", "--port", "5244"]');
+      }
+      if (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string')) {
+        throw new Error('运行参数必须是 JSON 字符串数组');
+      }
+      return args;
+    }
+
+    function formatArgs(args) {
+      return JSON.stringify(args || []);
     }
 
     function parseEnvLines(input) {
@@ -2469,7 +2483,7 @@
           task.id,
           task.name,
           task.program,
-          (task.args || []).join(' '),
+          formatArgs(task.args),
           task.workdir
         ].join(' ').toLowerCase();
         return haystack.includes(keyword);
@@ -2687,7 +2701,7 @@
       document.getElementById('task-id').value = '';
       document.getElementById('task-name').value = '';
       document.getElementById('task-program').value = '';
-      document.getElementById('task-args').value = '';
+      document.getElementById('task-args').value = '[]';
       document.getElementById('task-workdir').value = '';
       document.getElementById('task-env').value = '';
       document.getElementById('task-timeout').value = '';
@@ -2708,7 +2722,7 @@
       document.getElementById('task-id').disabled = true;
       document.getElementById('task-name').value = task.name || '';
       document.getElementById('task-program').value = task.program || '';
-      document.getElementById('task-args').value = (task.args || []).join(' ');
+      document.getElementById('task-args').value = formatArgs(task.args);
       document.getElementById('task-workdir').value = task.workdir || '';
       document.getElementById('task-env').value = formatEnvLines(task.env);
       document.getElementById('task-timeout').value = task.stop_timeout_sec || 8;
@@ -2886,11 +2900,19 @@
         return;
       }
 
+      let args;
+      try {
+        args = parseArgs(document.getElementById('task-args').value);
+      } catch (err) {
+        alert(err.message);
+        return;
+      }
+
       const payload = {
         id: id,
         name: document.getElementById('task-name').value.trim() || id,
         program: document.getElementById('task-program').value.trim(),
-        args: splitArgs(document.getElementById('task-args').value),
+        args: args,
         workdir: document.getElementById('task-workdir').value.trim(),
         env: parseEnvLines(document.getElementById('task-env').value),
         autostart: document.getElementById('task-autostart').checked,

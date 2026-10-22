@@ -40,6 +40,9 @@ Windows GUI 版：
 
 默认控制面板地址：`http://127.0.0.1:3719`
 
+网页的“运行参数”使用 JSON 字符串数组，例如 `["server", "--port", "5244"]`。
+每项对应一个参数；带空格路径和空参数可写为 `["--config", "C:\\App Data\\config.json", ""]`。
+
 > 每个版本的更新内容统一记录在 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## 访问鉴权
