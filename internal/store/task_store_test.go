@@ -4,10 +4,57 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"zhulingtai/internal/task"
 )
+
+func TestSaveConfigurationRollsBackTasksWhenSchedulesFail(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewTaskStore(filepath.Join(dir, "tasks.db"), filepath.Join(dir, "tasks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	tasks := []task.Config{{ID: "original", Name: "Original", Program: "none"}}
+	schedules := []task.Schedule{{ID: "plan", TaskID: "original", Name: "Plan", CronExpr: "* * * * *", Action: task.ScheduleActionStart, Enabled: true}}
+	if err := s.SaveConfiguration(tasks, schedules); err != nil {
+		t.Fatal(err)
+	}
+	beforeTasks, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeSchedules, err := s.LoadSchedules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`CREATE TRIGGER reject_schedule_insert BEFORE INSERT ON schedules BEGIN SELECT RAISE(ABORT, 'save rejected'); END`); err != nil {
+		t.Fatal(err)
+	}
+	changed := []task.Config{{ID: "new", Name: "New", Program: "none"}}
+	if err := s.SaveConfiguration(changed, schedules); err == nil {
+		t.Fatal("expected schedule write failure")
+	}
+	afterTasks, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterSchedules, err := s.LoadSchedules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(beforeTasks, afterTasks) || !reflect.DeepEqual(beforeSchedules, afterSchedules) {
+		t.Fatal("failed import partially persisted")
+	}
+	if _, err := s.db.Exec(`DROP TRIGGER reject_schedule_insert`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveConfiguration(changed, schedules); err != nil {
+		t.Fatalf("connection not reusable after rollback: %v", err)
+	}
+}
 
 func TestTaskStoreSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()

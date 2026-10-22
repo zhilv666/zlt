@@ -125,11 +125,11 @@ func (c *trayController) syncTaskMenus() {
 func (c *trayController) listenTaskControl(entry *trayTaskItem) {
 	go func() {
 		for range entry.controlItem.ClickedCh {
-			state, ok := c.rt.Manager.State(entry.taskID)
+			state, ok := c.rt.State(entry.taskID)
 			if ok && isTaskRunning(state.Status) {
-				_ = c.rt.Manager.Stop(entry.taskID)
+				_ = c.rt.Stop(entry.taskID)
 			} else {
-				_ = c.rt.Manager.Start(entry.taskID)
+				_ = c.rt.Start(entry.taskID)
 			}
 			c.mu.Lock()
 			cfg, ok := c.lookupTask(entry.taskID)
@@ -142,7 +142,7 @@ func (c *trayController) listenTaskControl(entry *trayTaskItem) {
 }
 
 func (c *trayController) refreshTaskItem(cfg task.Config, entry *trayTaskItem) {
-	state, ok := c.rt.Manager.State(cfg.ID)
+	state, ok := c.rt.State(cfg.ID)
 	if !ok || !isTaskRunning(state.Status) {
 		entry.controlItem.SetTitle("▶ 启动 " + cfg.Name)
 		entry.controlItem.SetTooltip("Start " + cfg.Name)

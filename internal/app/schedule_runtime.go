@@ -20,13 +20,13 @@ const scheduleStopTimeout = 10 * time.Second
 // constructed; safe to call once during application startup.
 func (r *Runtime) StartScheduler() error {
 	r.mu.Lock()
-	err := r.disableOrphanSchedulesLocked()
-	schedules := r.copySchedulesLocked()
-	r.mu.Unlock()
-
+	defer r.mu.Unlock()
+	if err := r.disableOrphanSchedulesLocked(); err != nil {
+		return err
+	}
 	r.Sched.Start()
-	r.Sched.Reload(schedules)
-	return err
+	r.reloadSchedulerLocked()
+	return nil
 }
 
 func (r *Runtime) ListSchedules() []task.Schedule {
@@ -48,6 +48,7 @@ func (r *Runtime) UpsertSchedule(sch task.Schedule) error {
 		return fmt.Errorf("task %q not found", sch.TaskID)
 	}
 
+	candidate := r.copySchedulesLocked()
 	now := nowRFC3339()
 	if i := r.findScheduleIndexLocked(sch.ID); i >= 0 {
 		// Run history and creation time are server-owned; edits never reset them.
@@ -57,19 +58,20 @@ func (r *Runtime) UpsertSchedule(sch task.Schedule) error {
 		sch.LastStatus = prev.LastStatus
 		sch.LastDetail = prev.LastDetail
 		sch.UpdatedAt = now
-		r.Schedules[i] = sch
+		candidate[i] = sch
 	} else {
 		sch.CreatedAt = now
 		sch.UpdatedAt = now
 		sch.LastRunAt = ""
 		sch.LastStatus = ""
 		sch.LastDetail = ""
-		r.Schedules = append(r.Schedules, sch)
+		candidate = append(candidate, sch)
 	}
 
-	if err := r.TaskStore.SaveSchedules(r.Schedules); err != nil {
+	if err := r.TaskStore.SaveSchedules(candidate); err != nil {
 		return err
 	}
+	r.Schedules = candidate
 	r.reloadSchedulerLocked()
 	return nil
 }
@@ -82,11 +84,13 @@ func (r *Runtime) DeleteSchedule(scheduleID string) error {
 	if i < 0 {
 		return fmt.Errorf("schedule %q not found", scheduleID)
 	}
-	r.Schedules = append(r.Schedules[:i], r.Schedules[i+1:]...)
+	candidate := r.copySchedulesLocked()
+	candidate = append(candidate[:i], candidate[i+1:]...)
 
-	if err := r.TaskStore.SaveSchedules(r.Schedules); err != nil {
+	if err := r.TaskStore.SaveSchedules(candidate); err != nil {
 		return err
 	}
+	r.Schedules = candidate
 	r.reloadSchedulerLocked()
 	return nil
 }
@@ -105,12 +109,14 @@ func (r *Runtime) SetScheduleEnabled(scheduleID string, enabled bool) error {
 	if r.Schedules[i].Enabled == enabled {
 		return nil
 	}
-	r.Schedules[i].Enabled = enabled
-	r.Schedules[i].UpdatedAt = nowRFC3339()
+	candidate := r.copySchedulesLocked()
+	candidate[i].Enabled = enabled
+	candidate[i].UpdatedAt = nowRFC3339()
 
-	if err := r.TaskStore.SaveSchedules(r.Schedules); err != nil {
+	if err := r.TaskStore.SaveSchedules(candidate); err != nil {
 		return err
 	}
+	r.Schedules = candidate
 	r.reloadSchedulerLocked()
 	return nil
 }
@@ -147,34 +153,49 @@ func (r *Runtime) recordScheduleResult(scheduleID string, at time.Time, status s
 	if i < 0 {
 		return
 	}
-	r.Schedules[i].LastRunAt = at.Format(time.RFC3339)
-	r.Schedules[i].LastStatus = status
-	r.Schedules[i].LastDetail = detail
+	candidate := r.copySchedulesLocked()
+	candidate[i].LastRunAt = at.Format(time.RFC3339)
+	candidate[i].LastStatus = status
+	candidate[i].LastDetail = detail
 
-	if err := r.TaskStore.SaveSchedules(r.Schedules); err != nil {
+	if err := r.TaskStore.SaveSchedules(candidate); err != nil {
 		slog.Error("schedule: failed to persist run result", "schedule", scheduleID, "err", err)
+		return
 	}
+	r.Schedules = candidate
 }
 
 // disableOrphanSchedulesLocked disables enabled schedules whose task no longer
 // exists (e.g. removed by an import) and records why. Caller holds r.mu.
 func (r *Runtime) disableOrphanSchedulesLocked() error {
-	changed := false
-	now := nowRFC3339()
-	for i := range r.Schedules {
-		if !r.Schedules[i].Enabled || r.taskExistsLocked(r.Schedules[i].TaskID) {
-			continue
-		}
-		r.Schedules[i].Enabled = false
-		r.Schedules[i].LastDetail = "task not found: " + r.Schedules[i].TaskID + " (schedule disabled)"
-		r.Schedules[i].UpdatedAt = now
-		changed = true
-		slog.Warn("schedule disabled: task missing", "schedule", r.Schedules[i].ID, "task", r.Schedules[i].TaskID)
-	}
+	candidate, changed := disableOrphanSchedules(r.Tasks, r.copySchedulesLocked())
 	if !changed {
 		return nil
 	}
-	return r.TaskStore.SaveSchedules(r.Schedules)
+	if err := r.TaskStore.SaveSchedules(candidate); err != nil {
+		return err
+	}
+	r.Schedules = candidate
+	return nil
+}
+
+func disableOrphanSchedules(tasks []task.Config, schedules []task.Schedule) ([]task.Schedule, bool) {
+	ids := make(map[string]bool, len(tasks))
+	for _, cfg := range tasks {
+		ids[cfg.ID] = true
+	}
+	changed := false
+	now := nowRFC3339()
+	for i := range schedules {
+		if !schedules[i].Enabled || ids[schedules[i].TaskID] {
+			continue
+		}
+		schedules[i].Enabled = false
+		schedules[i].LastDetail = "task not found: " + schedules[i].TaskID + " (schedule disabled)"
+		schedules[i].UpdatedAt = now
+		changed = true
+	}
+	return schedules, changed
 }
 
 func (r *Runtime) reloadSchedulerLocked() {

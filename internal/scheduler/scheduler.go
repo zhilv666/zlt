@@ -16,8 +16,8 @@ import (
 )
 
 // Controller is the slice of Runtime the scheduler drives tasks through.
-// It must be backed by *app.Runtime — never by a cached *process.Manager,
-// because task import replaces the Manager instance wholesale.
+// It is backed by *app.Runtime so task operations share the configuration lock
+// with imports and persisted updates.
 type Controller interface {
 	State(taskID string) (process.RuntimeState, bool)
 	Start(taskID string) error
