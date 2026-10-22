@@ -2,7 +2,7 @@ package process
 
 import (
 	"path"
-	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -10,12 +10,8 @@ func commandMatchesTask(commandLine string, programPath string, args []string) b
 	if !commandMatchesProgram(commandLine, programPath) {
 		return false
 	}
-	if len(args) == 0 {
-		return true
-	}
-
 	commandArgs := extractCommandArgs(commandLine)
-	if len(commandArgs) < len(args) {
+	if len(commandArgs) != len(args) {
 		return false
 	}
 
@@ -32,12 +28,7 @@ func commandMatchesProgram(commandLine string, programPath string) bool {
 		return false
 	}
 
-	commandPath := extractCommandPath(commandLine)
-	if commandPath != "" && sameExecutable(commandPath, programPath) {
-		return true
-	}
-
-	return strings.Contains(normalizeProcessValue(commandLine), normalizeProcessValue(programPath))
+	return sameExecutable(extractCommandPath(commandLine), programPath)
 }
 
 func extractCommandArgs(commandLine string) []string {
@@ -65,56 +56,53 @@ func splitCommandLine(commandLine string) []string {
 	var parts []string
 	var current strings.Builder
 	inQuotes := false
+	started := false
 
 	for _, ch := range line {
 		switch {
 		case ch == '"':
 			inQuotes = !inQuotes
+			started = true
 		case !inQuotes && (ch == ' ' || ch == '\t'):
-			if current.Len() > 0 {
+			if started {
 				parts = append(parts, current.String())
 				current.Reset()
+				started = false
 			}
 		default:
 			current.WriteRune(ch)
+			started = true
 		}
 	}
 
-	if current.Len() > 0 {
+	if started {
 		parts = append(parts, current.String())
 	}
 	return parts
 }
 
 func sameExecutable(left string, right string) bool {
-	leftNorm := normalizeProcessValue(left)
-	rightNorm := normalizeProcessValue(right)
-	if leftNorm == rightNorm {
-		return true
-	}
-
-	return strings.EqualFold(filepath.Base(leftNorm), filepath.Base(rightNorm))
+	return left != "" && right != "" && normalizeProcessValue(left) == normalizeProcessValue(right)
 }
 
 func sameCommandArg(left string, right string) bool {
-	leftNorm := normalizeProcessValue(left)
-	rightNorm := normalizeProcessValue(right)
-	if leftNorm == rightNorm {
-		return true
-	}
-
-	return strings.EqualFold(filepath.Base(leftNorm), filepath.Base(rightNorm))
+	return left == right
 }
 
 func normalizeProcessValue(value string) string {
 	normalized := strings.TrimSpace(value)
 	normalized = strings.Trim(normalized, `"`)
-	normalized = strings.ReplaceAll(normalized, `\`, `/`)
-	normalized = path.Clean(normalized)
-	return strings.ToLower(normalized)
+	if runtime.GOOS == "windows" {
+		normalized = strings.ReplaceAll(normalized, `\`, `/`)
+		normalized = strings.ToLower(normalized)
+	}
+	return path.Clean(normalized)
 }
 
 func sameWorkingDir(left string, right string) bool {
+	if strings.TrimSpace(left) == "" || strings.TrimSpace(right) == "" {
+		return false
+	}
 	leftNorm := normalizeProcessValue(left)
 	rightNorm := normalizeProcessValue(right)
 	if leftNorm == "" || rightNorm == "" {

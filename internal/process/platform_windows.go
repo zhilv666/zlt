@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/windows"
+
 	"zhulingtai/internal/task"
 )
 
@@ -60,12 +62,12 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 		}
 	}
 
-	script := "$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
+	script := "$ErrorActionPreference = 'Stop'; $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
 		"Get-CimInstance Win32_Process | ForEach-Object { " +
-		"$pid = $_.ProcessId; " +
+		"$processId = $_.ProcessId; " +
 		"$exe = if ($_.ExecutablePath) { $_.ExecutablePath } else { '' }; " +
 		"$cmd = if ($_.CommandLine) { $_.CommandLine } else { '' }; " +
-		"Write-Output ($pid.ToString() + \"`t\" + ($exe -replace \"`t\", \" \") + \"`t\" + ($cmd -replace \"`t\", \" \")) " +
+		"Write-Output ($processId.ToString() + \"`t\" + ($exe -replace \"`t\", \" \") + \"`t\" + ($cmd -replace \"`t\", \" \")) " +
 		"}"
 
 	checkCmd := exec.Command("powershell.exe", "-NoProfile", "-Command", script)
@@ -97,7 +99,23 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 		if executablePath != "" && !sameExecutable(executablePath, resolvedProgram) {
 			continue
 		}
-		if !commandMatchesTask(commandLine, resolvedProgram, cfg.Args) {
+		if executablePath == "" && !commandMatchesProgram(commandLine, resolvedProgram) {
+			continue
+		}
+		// ExecutablePath already establishes identity even if argv[0] is a
+		// basename. Use Windows' own parser for quotes and backslash escaping.
+		argv, err := windows.DecomposeCommandLine(commandLine)
+		if err != nil || len(argv) != len(cfg.Args)+1 {
+			continue
+		}
+		matches := true
+		for i, arg := range cfg.Args {
+			if argv[i+1] != arg {
+				matches = false
+				break
+			}
+		}
+		if !matches {
 			continue
 		}
 		return pid, true
