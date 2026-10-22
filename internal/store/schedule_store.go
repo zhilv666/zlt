@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"strings"
 
 	"zhulingtai/internal/task"
@@ -97,12 +98,15 @@ func (s *TaskStore) SaveSchedules(schedules []task.Schedule) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	defer func() { _ = tx.Rollback() }()
+	if err := saveSchedules(tx, schedules); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+func saveSchedules(tx *sql.Tx, schedules []task.Schedule) error {
+	var err error
 	if _, err = tx.Exec(`DELETE FROM schedules`); err != nil {
 		return err
 	}
@@ -136,5 +140,5 @@ func (s *TaskStore) SaveSchedules(schedules []task.Schedule) error {
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }

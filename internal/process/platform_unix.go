@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"zhulingtai/internal/task"
 )
@@ -36,14 +38,85 @@ func killProcessTree(pid int) error {
 		return fmt.Errorf("invalid pid")
 	}
 
-	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		proc, findErr := os.FindProcess(pid)
-		if findErr != nil {
-			return findErr
+	// An adopted process may share its parent's group. Never signal that group;
+	// stop only its descendants and the target itself in that case.
+	pgid, err := syscall.Getpgid(pid)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if pgid == pid {
+		err = syscall.Kill(-pid, syscall.SIGKILL)
+	} else {
+		for _, child := range descendantPIDs(pid) {
+			if err := syscall.Kill(child, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+				return err
+			}
 		}
-		return proc.Kill()
+		err = syscall.Kill(pid, syscall.SIGKILL)
+	}
+	if err != nil && !errors.Is(err, syscall.ESRCH) {
+		return err
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for processIsAlive(pid) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("process %d did not exit after SIGKILL", pid)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	return nil
+}
+
+func descendantPIDs(pid int) []int {
+	out, err := exec.Command("ps", "-ax", "-o", "pid=", "-o", "ppid=").Output()
+	if err != nil {
+		return nil
+	}
+	children := make(map[int][]int)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		child, e1 := strconv.Atoi(fields[0])
+		parent, e2 := strconv.Atoi(fields[1])
+		if e1 == nil && e2 == nil {
+			children[parent] = append(children[parent], child)
+		}
+	}
+	var result []int
+	var visit func(int)
+	visit = func(parent int) {
+		for _, child := range children[parent] {
+			visit(child)
+			result = append(result, child)
+		}
+	}
+	visit(pid)
+	return result
+}
+
+func processIsAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	if errors.Is(err, syscall.ESRCH) {
+		return false
+	}
+	if runtime.GOOS == "linux" {
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if errors.Is(err, os.ErrNotExist) {
+			return false
+		}
+		if err == nil {
+			end := strings.LastIndexByte(string(data), ')')
+			if end >= 0 && len(data) > end+2 && (data[end+2] == 'Z' || data[end+2] == 'X') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func findExistingProcess(cfg task.Config) (int, bool) {
@@ -83,9 +156,36 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 			continue
 		}
 
-		commandLine := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
-		if !commandMatchesTask(commandLine, resolvedProgram, cfg.Args) {
-			continue
+		if runtime.GOOS == "linux" {
+			// ps flattens argv and loses spaces and empty arguments. /proc keeps
+			// their exact boundaries and exposes the actual executable identity.
+			exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+			if err != nil || !sameExecutableFile(exe, resolvedProgram) {
+				continue
+			}
+			data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+			if err != nil {
+				continue
+			}
+			argv := strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00")
+			if len(argv) != len(cfg.Args)+1 {
+				continue
+			}
+			matches := true
+			for i, arg := range cfg.Args {
+				if argv[i+1] != arg {
+					matches = false
+					break
+				}
+			}
+			if !matches {
+				continue
+			}
+		} else {
+			commandLine := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+			if !commandMatchesTask(commandLine, resolvedProgram, cfg.Args) {
+				continue
+			}
 		}
 		if !processMatchesWorkingDir(pid, resolvedWorkdir) {
 			continue
@@ -94,6 +194,18 @@ func findExistingProcess(cfg task.Config) (int, bool) {
 	}
 
 	return 0, false
+}
+
+func sameExecutableFile(left, right string) bool {
+	if sameExecutable(left, right) {
+		return true
+	}
+	l, err := os.Stat(left)
+	if err != nil {
+		return false
+	}
+	r, err := os.Stat(right)
+	return err == nil && os.SameFile(l, r)
 }
 
 func processMatchesWorkingDir(pid int, expected string) bool {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
 )
 
 // autostartLog is the shared component-scoped logger for the platform-specific
@@ -27,10 +28,26 @@ func autostartCommand(args []string) error {
 
 	switch args[0] {
 	case "enable":
-		return enableAutostart()
+		if len(args) == 1 {
+			return enableAutostart()
+		}
+		if runtime.GOOS != "linux" {
+			return errors.New("custom autostart service options are supported only on Linux")
+		}
+		opts, err := parseServiceCommandArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		return enableAutostartWithOptions(opts, true)
 	case "disable":
+		if len(args) != 1 {
+			return errors.New("usage: autostart disable")
+		}
 		return disableAutostart()
 	case "status":
+		if len(args) != 1 {
+			return errors.New("usage: autostart status")
+		}
 		return statusAutostart()
 	default:
 		return fmt.Errorf("unknown autostart action: %s", args[0])

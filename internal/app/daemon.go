@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 )
 
@@ -55,8 +54,8 @@ func waitForDetachedStart(pidFile string, childPID int, logPath string) error {
 	return fmt.Errorf("驻令台 后台进程在规定时间内未就绪，请查看日志 %s", logPath)
 }
 
-// ensureNotRunning fails fast when a live instance already holds pidFile, and
-// clears the file when it turns out to be stale so the caller can proceed.
+// ensureNotRunning fails fast when the payload points at a live instance.
+// Stale payloads are reclaimed only while holding the OS lock during startup.
 func ensureNotRunning(pidFile string) error {
 	existing, err := readPIDFile(pidFile)
 	if err != nil {
@@ -65,6 +64,5 @@ func ensureNotRunning(pidFile string) error {
 	if processMatches(existing.PID, existing.Exe) {
 		return fmt.Errorf("%w (pid %d)", errAlreadyRunning, existing.PID)
 	}
-	_ = os.Remove(pidFile)
 	return nil
 }

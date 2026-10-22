@@ -31,9 +31,9 @@ type Runtime struct {
 
 	// Browser authentication. AuthKeyPath is the on-disk path of data/auth.key
 	// (the tray "view key" entry opens it). AuthSessions is closed on shutdown.
-	Auth           *auth.Service
-	AuthKeyPath    string
-	authSessions   *auth.SessionStore
+	Auth         *auth.Service
+	AuthKeyPath  string
+	authSessions *auth.SessionStore
 
 	autoStartOnce sync.Once
 	autoStartErr  error
@@ -142,22 +142,32 @@ func (r *Runtime) Address() string {
 }
 
 func (r *Runtime) States() []process.RuntimeState {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.Manager.States()
 }
 
 func (r *Runtime) State(taskID string) (process.RuntimeState, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.Manager.State(taskID)
 }
 
 func (r *Runtime) Start(taskID string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.Manager.Start(taskID)
 }
 
 func (r *Runtime) Stop(taskID string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.Manager.Stop(taskID)
 }
 
 func (r *Runtime) ClearLogs(taskID string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.Manager.ClearLogs(taskID)
 }
 
@@ -179,21 +189,23 @@ func (r *Runtime) UpsertTask(cfg task.Config) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for i := range r.Tasks {
-		if r.Tasks[i].ID == cfg.ID {
-			state, ok := r.Manager.State(cfg.ID)
-			if ok && state.Status != process.StatusStopped && state.Status != process.StatusExited && state.Status != process.StatusFailed {
-				return errors.New("task is running, stop it before editing")
-			}
-			r.Tasks[i] = cfg
-			r.Manager.UpsertTask(cfg)
-			return r.TaskStore.Save(r.Tasks)
+	candidate := r.copyTasksLocked()
+	found := false
+	for i := range candidate {
+		if candidate[i].ID == cfg.ID {
+			candidate[i] = cfg
+			found = true
+			break
 		}
 	}
-
-	r.Tasks = append(r.Tasks, cfg)
-	r.Manager.UpsertTask(cfg)
-	return r.TaskStore.Save(r.Tasks)
+	if !found {
+		candidate = append(candidate, cfg)
+	}
+	if err := r.Manager.UpdateTask(cfg, true, func() error { return r.TaskStore.Save(candidate) }); err != nil {
+		return err
+	}
+	r.Tasks = candidate
+	return nil
 }
 
 func (r *Runtime) DeleteTask(taskID string) error {
@@ -215,12 +227,14 @@ func (r *Runtime) DeleteTask(taskID string) error {
 		return fmt.Errorf("task %q has %d schedule(s) attached, delete them first", taskID, n)
 	}
 
-	if err := r.Manager.RemoveTask(taskID); err != nil {
+	candidate := r.copyTasksLocked()
+	candidate = append(candidate[:index], candidate[index+1:]...)
+	if err := r.Manager.RemoveTaskAfterSave(taskID, func() error { return r.TaskStore.Save(candidate) }); err != nil {
 		return err
 	}
 
-	r.Tasks = append(r.Tasks[:index], r.Tasks[index+1:]...)
-	return r.TaskStore.Save(r.Tasks)
+	r.Tasks = candidate
+	return nil
 }
 
 func (r *Runtime) ExportTasks() []task.Config {
@@ -242,33 +256,18 @@ func (r *Runtime) ReplaceTasks(tasks []task.Config) error {
 		normalized = append(normalized, cfg)
 	}
 
-	for _, st := range r.Manager.States() {
-		if st.Status == process.StatusRunning || st.Status == process.StatusStarting || st.Status == process.StatusStopping {
-			return errors.New("stop all running tasks before import")
-		}
-	}
-
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	schedules, _ := disableOrphanSchedules(normalized, r.copySchedulesLocked())
+	if err := r.Manager.ReplaceTasks(normalized, func() error {
+		return r.TaskStore.SaveConfiguration(normalized, schedules)
+	}); err != nil {
+		return err
+	}
 	r.Tasks = normalized
-	r.Manager = process.NewManager(normalized)
-	// A fresh manager starts at default rotation limits; restore the persisted
-	// task-log settings so an import does not silently reset them.
-	if settings, err := r.TaskStore.LoadSettings(); err == nil {
-		r.Manager.SetLogLimits(int64(settings.TaskLogMaxSizeMB)*megabyte, settings.TaskLogMaxBackups)
-	}
-	if err := r.TaskStore.Save(r.Tasks); err != nil {
-		r.mu.Unlock()
-		return err
-	}
-	// Import may have removed tasks that schedules reference; keep those
-	// schedules but disable them so the scheduler never fires into a void.
-	if err := r.disableOrphanSchedulesLocked(); err != nil {
-		r.mu.Unlock()
-		return err
-	}
+	r.Schedules = schedules
 	r.reloadSchedulerLocked()
-	r.mu.Unlock()
-	return r.applyAutoStart()
+	return r.applyAutoStartLocked()
 }
 
 func normalizeTask(cfg task.Config) task.Config {
@@ -356,7 +355,13 @@ func validateTask(cfg task.Config) error {
 }
 
 func (r *Runtime) applyAutoStart() error {
-	for _, cfg := range r.ListTasks() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.applyAutoStartLocked()
+}
+
+func (r *Runtime) applyAutoStartLocked() error {
+	for _, cfg := range r.Tasks {
 		if !cfg.AutoStart {
 			continue
 		}
@@ -378,8 +383,10 @@ func (r *Runtime) StartAutoStartTasks() error {
 }
 
 func (r *Runtime) StopAllTasks() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	var firstErr error
-	for _, cfg := range r.ListTasks() {
+	for _, cfg := range r.Tasks {
 		slog.Info("shutdown task stopping", "task", cfg.ID)
 		if err := r.Manager.Stop(cfg.ID); err != nil && firstErr == nil {
 			slog.Error("shutdown task failed", "task", cfg.ID, "err", err)
@@ -392,6 +399,8 @@ func (r *Runtime) StopAllTasks() error {
 }
 
 func (r *Runtime) RestartTask(taskID string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	state, ok := r.Manager.State(taskID)
 	if !ok {
 		return fmt.Errorf("%w: %s", process.ErrTaskNotFound, taskID)
@@ -424,10 +433,20 @@ func (r *Runtime) SetRestartOnCrash(taskID string, enabled bool) error {
 			continue
 		}
 
-		r.Tasks[i].RestartOnCrash = enabled
-		r.Manager.UpsertTask(r.Tasks[i])
-		return r.TaskStore.Save(r.Tasks)
+		candidate := r.copyTasksLocked()
+		candidate[i].RestartOnCrash = enabled
+		if err := r.Manager.UpdateTask(candidate[i], false, func() error { return r.TaskStore.Save(candidate) }); err != nil {
+			return err
+		}
+		r.Tasks = candidate
+		return nil
 	}
 
 	return fmt.Errorf("%w: %s", process.ErrTaskNotFound, taskID)
+}
+
+func (r *Runtime) copyTasksLocked() []task.Config {
+	out := make([]task.Config, len(r.Tasks))
+	copy(out, r.Tasks)
+	return out
 }

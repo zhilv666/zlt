@@ -132,13 +132,31 @@ func (s *TaskStore) Save(tasks []task.Config) error {
 	if err != nil {
 		return err
 	}
-	// 统一延迟回滚：提交成功后 Rollback 返回 ErrTxDone（已忽略）；
-	// 任一错误路径都会回滚未提交事务。此前循环内用 := 重新声明 err
-	// 遮蔽外层，导致循环中 marshal/exec 失败时 defer 看到的外层 err 仍为
-	// nil 而跳过回滚，事务被遗弃并泄漏连接。循环内改用独立变量 mErr
-	// 彻底消除遮蔽，并由无条件延迟回滚兜底。
 	defer func() { _ = tx.Rollback() }()
+	if err := saveTasks(tx, tasks); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+// SaveConfiguration commits imports and orphan schedule changes together.
+func (s *TaskStore) SaveConfiguration(tasks []task.Config, schedules []task.Schedule) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := saveTasks(tx, tasks); err != nil {
+		return err
+	}
+	if err := saveSchedules(tx, schedules); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func saveTasks(tx *sql.Tx, tasks []task.Config) error {
+	var err error
 	if _, err = tx.Exec(`DELETE FROM tasks`); err != nil {
 		return err
 	}
@@ -183,7 +201,7 @@ func (s *TaskStore) Save(tasks []task.Config) error {
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func (s *TaskStore) initSchema() error {

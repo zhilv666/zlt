@@ -182,7 +182,7 @@ func (r *Runtime) DashboardURL() string {
 }
 
 func newHTTPServer(runtime *Runtime, addr string, authSvc *auth.Service) *http.Server {
-	apiServer := api.NewServer(runtime, runtime, autoStartAPIAdapter{}, runtime, runtime)
+	apiServer := api.NewServer(runtime, runtime, autoStartAPIAdapter{addr: addr}, runtime, runtime)
 	if authSvc != nil {
 		apiServer.WithAuth(authSvc)
 	}

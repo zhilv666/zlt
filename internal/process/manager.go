@@ -48,6 +48,7 @@ type managedProcess struct {
 	logFile        *logging.RotatingWriter
 	done           chan struct{}
 	healthStop     chan struct{}
+	restartCancel  chan struct{}
 	state          RuntimeState
 	restartCount   int
 	healthFailures int
@@ -94,11 +95,13 @@ func NewManager(tasks []task.Config) *Manager {
 			state: state,
 		}
 	}
+	manager.mu.Lock()
 	for _, proc := range manager.procs {
 		if proc.state.Status == StatusRunning {
 			manager.startHealthMonitorLocked(proc)
 		}
 	}
+	manager.mu.Unlock()
 	return manager
 }
 
@@ -188,6 +191,29 @@ func (m *Manager) ClearLogs(taskID string) error {
 func (m *Manager) UpsertTask(cfg task.Config) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.upsertTaskLocked(cfg)
+}
+
+// UpdateTask keeps validation, persistence and application atomic with starts
+// and automatic restarts. A failed save leaves the active task unchanged.
+func (m *Manager) UpdateTask(cfg task.Config, requireStopped bool, save func() error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if proc, ok := m.procs[cfg.ID]; ok && requireStopped && (proc.cmd != nil || isRunningStatus(proc.state.Status)) {
+		return errors.New("task is running, stop it before editing")
+	}
+	if err := save(); err != nil {
+		return err
+	}
+	if proc, ok := m.procs[cfg.ID]; ok && requireStopped {
+		m.cancelRestartLocked(proc)
+		proc.restartCount = 0
+	}
+	m.upsertTaskLocked(cfg)
+	return nil
+}
+
+func (m *Manager) upsertTaskLocked(cfg task.Config) {
 
 	proc, ok := m.procs[cfg.ID]
 	if !ok {
@@ -201,10 +227,17 @@ func (m *Manager) UpsertTask(cfg task.Config) {
 		return
 	}
 
+	if !cfg.RestartOnCrash {
+		m.cancelRestartLocked(proc)
+	}
 	proc.task = cfg
 }
 
 func (m *Manager) RemoveTask(taskID string) error {
+	return m.RemoveTaskAfterSave(taskID, func() error { return nil })
+}
+
+func (m *Manager) RemoveTaskAfterSave(taskID string, save func() error) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -215,8 +248,45 @@ func (m *Manager) RemoveTask(taskID string) error {
 	if proc.cmd != nil || isRunningStatus(proc.state.Status) {
 		return errors.New("task is running, stop it before deleting")
 	}
+	if err := save(); err != nil {
+		return err
+	}
 
+	m.cancelRestartLocked(proc)
+	m.stopHealthMonitorLocked(proc)
 	delete(m.procs, taskID)
+	return nil
+}
+
+// ReplaceTasks reuses the manager so no caller can retain an obsolete task
+// controller. The lock prevents a queued restart from crossing the import.
+func (m *Manager) ReplaceTasks(tasks []task.Config, save func() error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, proc := range m.procs {
+		if proc.cmd != nil || isRunningStatus(proc.state.Status) {
+			return errors.New("stop all running tasks before import")
+		}
+	}
+	if err := save(); err != nil {
+		return err
+	}
+	for _, proc := range m.procs {
+		m.cancelRestartLocked(proc)
+		m.stopHealthMonitorLocked(proc)
+	}
+	m.procs = make(map[string]*managedProcess, len(tasks))
+	for _, cfg := range tasks {
+		proc := &managedProcess{task: cfg, state: RuntimeState{TaskID: cfg.ID, Status: StatusStopped}}
+		if pid, ok := findExistingProcess(cfg); ok {
+			proc.state.Status = StatusRunning
+			proc.state.PID = pid
+		}
+		m.procs[cfg.ID] = proc
+		if proc.state.Status == StatusRunning {
+			m.startHealthMonitorLocked(proc)
+		}
+	}
 	return nil
 }
 
@@ -230,13 +300,21 @@ func (m *Manager) Start(taskID string) error {
 // appending so the crash and its retry stay in one place.
 func (m *Manager) start(taskID string, freshRun bool) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.startLocked(taskID, freshRun)
+}
+
+// Caller holds m.mu, including when a restart timer fires.
+func (m *Manager) startLocked(taskID string, freshRun bool) error {
 	proc, ok := m.procs[taskID]
 	if !ok {
-		m.mu.Unlock()
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
 	}
-	if proc.state.Status == StatusRunning || proc.state.Status == StatusStarting {
-		m.mu.Unlock()
+	if freshRun {
+		m.cancelRestartLocked(proc)
+		proc.restartCount = 0
+	}
+	if isRunningStatus(proc.state.Status) || proc.cmd != nil {
 		return errors.New("task already running")
 	}
 
@@ -249,7 +327,6 @@ func (m *Manager) start(taskID string, freshRun bool) error {
 		proc.stopReason = ""
 		proc.stopMessage = ""
 		m.startHealthMonitorLocked(proc)
-		m.mu.Unlock()
 		return nil
 	}
 
@@ -267,7 +344,6 @@ func (m *Manager) start(taskID string, freshRun bool) error {
 	if err := os.MkdirAll(filepath.Join("data", "logs", proc.task.ID), 0o755); err != nil {
 		proc.state.Status = StatusFailed
 		proc.state.LastError = err.Error()
-		m.mu.Unlock()
 		return err
 	}
 
@@ -280,7 +356,6 @@ func (m *Manager) start(taskID string, freshRun bool) error {
 	if err != nil {
 		proc.state.Status = StatusFailed
 		proc.state.LastError = err.Error()
-		m.mu.Unlock()
 		return err
 	}
 
@@ -293,7 +368,6 @@ func (m *Manager) start(taskID string, freshRun bool) error {
 			_ = logFile.Close()
 			proc.state.Status = StatusFailed
 			proc.state.LastError = err.Error()
-			m.mu.Unlock()
 			return err
 		}
 	}
@@ -311,7 +385,6 @@ func (m *Manager) start(taskID string, freshRun bool) error {
 		_ = logFile.Close()
 		proc.state.Status = StatusFailed
 		proc.state.LastError = fmt.Sprintf("%s (program=%s)", err.Error(), resolvedProgram)
-		m.mu.Unlock()
 		return err
 	}
 
@@ -324,9 +397,9 @@ func (m *Manager) start(taskID string, freshRun bool) error {
 	proc.state.StartedAt = &now
 	proc.state.LastError = ""
 	m.startHealthMonitorLocked(proc)
-	m.mu.Unlock()
 
-	go m.wait(taskID, cmd, logFile, proc.done)
+	done := proc.done
+	go m.wait(taskID, cmd, logFile, done)
 	return nil
 }
 
@@ -340,6 +413,10 @@ func (m *Manager) stopWithReason(taskID string, reason stopReason, message strin
 	if !ok {
 		m.mu.Unlock()
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	if reason == stopReasonUser {
+		m.cancelRestartLocked(proc)
+		proc.stopReason = reason
 	}
 	if proc.state.Status == StatusStopped || proc.state.Status == StatusExited || proc.state.Status == StatusFailed {
 		m.mu.Unlock()
@@ -401,6 +478,11 @@ func (m *Manager) stopWithReason(taskID string, reason stopReason, message strin
 		if err := killProcessTree(cmd.Process.Pid); err != nil {
 			return err
 		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			return errors.New("task did not exit after forced stop")
+		}
 	case <-done:
 	}
 
@@ -409,7 +491,7 @@ func (m *Manager) stopWithReason(taskID string, reason stopReason, message strin
 
 func (m *Manager) wait(taskID string, cmd *exec.Cmd, logFile *logging.RotatingWriter, done chan struct{}) {
 	err := cmd.Wait()
-	close(done)
+	defer close(done)
 
 	_ = logFile.Close()
 
@@ -435,22 +517,16 @@ func (m *Manager) wait(taskID string, cmd *exec.Cmd, logFile *logging.RotatingWr
 	proc.state.ExitCode = &exitCode
 
 	if proc.state.Status == StatusStopping {
-		restartTaskID, delaySec, shouldRestart := m.finalizeStopLocked(proc)
+		_, _, _ = m.finalizeStopLocked(proc)
 		m.mu.Unlock()
-		if shouldRestart {
-			go m.scheduleRestart(restartTaskID, delaySec)
-		}
 		return
 	}
 
 	if err != nil {
 		proc.state.Status = StatusExited
 		proc.state.LastError = err.Error()
-		restartTaskID, delaySec, shouldRestart := m.prepareRestartLocked(proc)
+		_, _, _ = m.prepareRestartLocked(proc)
 		m.mu.Unlock()
-		if shouldRestart {
-			go m.scheduleRestart(restartTaskID, delaySec)
-		}
 		return
 	}
 
@@ -593,12 +669,40 @@ func (m *Manager) prepareRestartLocked(proc *managedProcess) (string, int, bool)
 	if proc.task.MaxRestartCount > 0 && proc.restartCount > proc.task.MaxRestartCount {
 		shouldRestart = false
 	}
+	m.cancelRestartLocked(proc)
+	if shouldRestart {
+		cancel := make(chan struct{})
+		proc.restartCancel = cancel
+		go m.scheduleRestart(proc, cancel, delaySec)
+	}
 	return proc.state.TaskID, delaySec, shouldRestart
 }
 
-func (m *Manager) scheduleRestart(taskID string, delaySec int) {
-	time.Sleep(time.Duration(delaySec) * time.Second)
-	_ = m.start(taskID, false)
+func (m *Manager) cancelRestartLocked(proc *managedProcess) {
+	if proc.restartCancel != nil {
+		close(proc.restartCancel)
+		proc.restartCancel = nil
+	}
+}
+
+func (m *Manager) scheduleRestart(proc *managedProcess, cancel chan struct{}, delaySec int) {
+	timer := time.NewTimer(time.Duration(delaySec) * time.Second)
+	defer timer.Stop()
+	select {
+	case <-cancel:
+		return
+	case <-timer.C:
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.procs[proc.task.ID] != proc || proc.restartCancel != cancel || !proc.task.RestartOnCrash {
+		return
+	}
+	proc.restartCancel = nil
+	if proc.task.MaxRestartCount > 0 && proc.restartCount > proc.task.MaxRestartCount {
+		return
+	}
+	_ = m.startLocked(proc.task.ID, false)
 }
 
 // runBannerLabel picks the banner wording written at the top of each run.
@@ -617,12 +721,22 @@ func resolveProgramPath(program string, workdir string) string {
 		return program
 	}
 	if strings.ContainsAny(program, `/\`) {
-		return filepath.Clean(filepath.Join(workdir, program))
+		candidate := filepath.Join(workdir, program)
+		if abs, err := filepath.Abs(candidate); err == nil {
+			return abs
+		}
+		return candidate
 	}
 
 	candidate := filepath.Join(workdir, program)
 	if _, err := os.Stat(candidate); err == nil {
+		if abs, err := filepath.Abs(candidate); err == nil {
+			return abs
+		}
 		return candidate
+	}
+	if resolved, err := exec.LookPath(program); err == nil {
+		return resolved
 	}
 	return program
 }

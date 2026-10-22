@@ -40,6 +40,9 @@ Windows GUI 版：
 
 默认控制面板地址：`http://127.0.0.1:3719`
 
+网页的“运行参数”使用 JSON 字符串数组，例如 `["server", "--port", "5244"]`。
+每项对应一个参数；带空格路径和空参数可写为 `["--config", "C:\\App Data\\config.json", ""]`。
+
 > 每个版本的更新内容统一记录在 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## 访问鉴权
@@ -229,7 +232,22 @@ Linux 软件开机自启（普通用户使用用户级，root / sudo 使用系�
 sudo ./bin/zlt-linux-amd64 autostart enable
 sudo ./bin/zlt-linux-amd64 autostart status
 sudo ./bin/zlt-linux-amd64 autostart disable
+
+# 自定义自启监听地址（--addr 与 --listen 等价）
+sudo ./bin/zlt-linux-amd64 autostart enable --listen 0.0.0.0:3719
+# 已运行的服务需重启，才会使用新的监听地址
+sudo systemctl restart zhulingtai.service
 ```
+
+网页首次启用 Linux 自启时沿用当前监听地址。已有 unit 在不带参数重新启用时会保留；
+`autostart enable --listen ...` 会重新生成 unit 并执行 `daemon-reload`，也支持 `--pid-file`。
+工作目录取执行命令时的目录，应在原部署目录运行。
+
+手工编辑 `/etc/systemd/system/zhulingtai.service` 后，执行
+`sudo systemctl daemon-reload` 和 `sudo systemctl restart zhulingtai.service`。
+用 `sudo systemctl show zhulingtai.service -p ExecStart -p MainPID` 查看实际加载的命令。
+用户级服务对应使用 `systemctl --user`。`./zlt stop` 会触发 unit 的 `Restart=always`，
+自动拉起仍使用 systemd 已加载的配置；要持续停止服务，使用 `systemctl stop`。
 
 访问密钥管理：
 

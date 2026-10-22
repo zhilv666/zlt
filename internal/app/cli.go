@@ -240,7 +240,7 @@ Usage:
   zlt stop [options]
   zlt restart [options]
   zlt status [options]
-  zlt autostart <enable|disable|status>
+  zlt autostart <enable|disable|status> [options]
   zlt auth <show|reset|set> [options]
   zlt version
   zlt -h | --help
@@ -268,6 +268,8 @@ Service options:
   --workdir <path>    Change to this directory before starting (run only)
 
 Notes:
+  Linux: autostart enable accepts --listen and --pid-file. Explicit options
+  regenerate the unit; enabling without options preserves an existing unit.
   Only one instance is allowed per working directory. A duplicate GUI launch
   opens the running instance's dashboard; a duplicate CLI launch fails.
 

@@ -23,6 +23,8 @@ func (r *Runtime) UpdateSettings(in task.Settings) (task.Settings, error) {
 	if err != nil {
 		return task.Settings{}, err
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.TaskStore.SaveSettings(normalized); err != nil {
 		return task.Settings{}, err
 	}

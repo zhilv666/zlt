@@ -1,6 +1,9 @@
 package process
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestExtractCommandPath(t *testing.T) {
 	cases := []struct {
@@ -42,10 +45,10 @@ func TestCommandMatchesProgram(t *testing.T) {
 			want:        true,
 		},
 		{
-			name:        "matches basename",
+			name:        "basename alone cannot identify executable",
 			commandLine: `openlist.exe server`,
 			programPath: `D:\SoftWare\OpenList\openlist.exe`,
-			want:        true,
+			want:        false,
 		},
 		{
 			name:        "different program",
@@ -121,7 +124,7 @@ func TestSameWorkingDir(t *testing.T) {
 			name:  "matches normalized windows separators",
 			left:  `C:\work\demo`,
 			right: `C:/work/demo`,
-			want:  true,
+			want:  runtime.GOOS == "windows",
 		},
 		{
 			name:  "different working directory",
