@@ -17,6 +17,7 @@ type AutoStartStatus struct {
 	Supported bool   `json:"supported"`
 	Enabled   bool   `json:"enabled"`
 	Status    string `json:"status"`
+	Manager   string `json:"manager,omitempty"`
 	UnitPath  string `json:"unit_path,omitempty"`
 	Message   string `json:"message,omitempty"`
 }

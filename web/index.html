@@ -2567,8 +2567,14 @@
       }
 
       let text = '状态: ' + (status.enabled ? '已启用' : '未启用');
+      if (status.manager) {
+        text += ' | ' + status.manager;
+      }
       if (status.unit_path) {
         text += ' | ' + status.unit_path;
+      }
+      if (status.message) {
+        text += ' | ' + status.message;
       }
       summary.textContent = text;
       toggleBtn.textContent = status.enabled ? '停用' : '启用';
