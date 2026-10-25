@@ -2,6 +2,16 @@
 
 本文件集中记录驻令台各版本的重要变化。后续正式版本发布时，GitHub Actions 会自动将新版本内容插入到文件顶部。
 
+## v0.4.0 (2026-10-25)
+
+### Features
+
+- ✨ feat(app): 支持 OpenWrt procd 开机自启 (46e1ebe)
+
+### Documentation
+
+- 📝 docs(changelog): 更新 v0.3.3 变更日志 [skip ci] (30cf901)
+
 ## v0.3.3 (2026-10-22)
 
 ### Fixes
