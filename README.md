@@ -44,7 +44,7 @@
 | 网页任务、计划和日志管理 | 支持 | 支持 | 支持 |
 | 系统托盘 | 支持 | 无 | 无 |
 | 前台 `run`、后台 `start` | 支持 | 支持 | 支持 |
-| 软件自启管理 | 当前用户登录自启 | systemd 用户或系统服务 | 暂不支持 |
+| 软件自启管理 | 当前用户登录自启 | systemd 用户或系统服务、OpenWrt procd | 暂不支持 |
 | 发行包架构 | amd64、arm64 | amd64、arm64 | amd64、arm64 |
 
 任务以驻令台进程的操作系统用户身份运行。Python、Node.js 等解释器及任务本身的依赖需要自行安装。
@@ -108,7 +108,7 @@ go run ./cmd/zlt run
 | 命令 | 行为 |
 | --- | --- |
 | `zlt` | Windows 启动托盘；Linux/macOS 前台运行，建议明确使用 `run` |
-| `zlt run` | 无托盘前台运行，适合终端调试或由 systemd 管理 |
+| `zlt run` | 无托盘前台运行，适合终端调试或由 systemd / procd 管理 |
 | `zlt start` | 启动独立后台进程，启动成功后返回 |
 | `zlt status` | 查看实例 PID 和实际监听地址，未运行时输出 `stopped` |
 | `zlt stop` | 停止驻令台实例；Windows 后台模式强制终止进程树 |
@@ -291,9 +291,11 @@ Windows 虚拟环境对应使用 `.venv/Scripts/python.exe`。`-u` 让 Python �
 
 自启使用 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，记录程序路径与启用时的工作目录。移动程序或部署目录后，需重新启用。此方式在用户登录后启动托盘，不是 Windows 系统服务。自定义 `--listen` 自启参数目前仅支持 Linux。
 
-### Linux：选择服务作用域
+Linux 自启会自动识别 init 系统：OpenWrt 及其衍生版本（ImmortalWrt、LEDE 等）使用 BusyBox procd，其余发行版使用 systemd。启用后 `autostart status` 与网页“设置”会显示当前使用的管理器。
 
-Linux 自启需要 systemd，作用域由执行命令的用户权限决定：
+### Linux：systemd（选择服务作用域）
+
+systemd 发行版上，作用域由执行命令的用户权限决定：
 
 | 执行身份 | 配置文件 | 管理命令 |
 | --- | --- | --- |
@@ -304,7 +306,7 @@ Linux 自启需要 systemd，作用域由执行命令的用户权限决定：
 
 启用时会执行 `daemon-reload` 和 `enable --now`，即启用自启并立即启动服务。若此前已用 `zlt start` 启动同一实例，应先停止旧实例，再交给 systemd。
 
-### Linux：自定义监听地址
+### Linux：systemd 自定义监听地址
 
 在原部署目录执行，以下以系统服务为例：
 
@@ -328,7 +330,7 @@ sudo systemctl status zhulingtai.service
 - 更新时一并传入需要保留的监听地址和 PID 文件；未指定的选项使用默认值。
 - 显式更新不会自动重启已经运行的服务，需执行 `sudo systemctl restart zhulingtai.service`。
 
-### Linux：手工编辑与运维
+### Linux：systemd 手工编辑与运维
 
 例如 `/etc/systemd/system/zhulingtai.service` 中：
 
@@ -360,6 +362,63 @@ sudo ./zlt autostart disable
 ```
 
 用户级服务对应使用 `systemctl --user` 和 `journalctl --user -u zhulingtai.service`，并以普通用户执行 `./zlt autostart ...`。检查作用域时要使用同一身份，避免修改系统 unit 却重启了用户服务。
+
+### Linux：OpenWrt（procd）
+
+OpenWrt 使用 BusyBox procd，没有 systemd。检测条件是 `/etc/rc.common` 与 `/sbin/procd` 同时存在，命中后 `autostart` 会生成 `/etc/init.d/zhulingtai` 并通过 `enable` 建立 `/etc/rc.d/S99zhulingtai` 开机链接。
+
+部署目录建议放在 `/usr/local/zlt`（`/opt` 在多数 OpenWrt 镜像上不存在，也不在 overlay 内）：
+
+```sh
+mkdir -p /usr/local/zlt
+cd /usr/local/zlt
+# 上传 zlt-linux-arm64 后重命名为 zlt 并赋予执行权限
+chmod +x zlt
+
+./zlt stop            # 仅在已有手动启动的后台实例时执行
+./zlt autostart enable --listen 0.0.0.0:3719
+./zlt autostart status
+/etc/init.d/zhulingtai status
+```
+
+生成的脚本内容：
+
+```sh
+#!/bin/sh /etc/rc.common
+START=99
+STOP=10
+USE_PROCD=1
+
+start_service() {
+	procd_open_instance
+	procd_set_param command '/usr/local/zlt/zlt' '--workdir' '/usr/local/zlt' 'run' '--listen' '0.0.0.0:3719'
+	procd_set_param respawn 3600 2 0
+	procd_set_param term_timeout 10
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+```
+
+与 systemd 的对应关系：
+
+| systemd | procd |
+| --- | --- |
+| `WorkingDirectory=` | 全局 `--workdir`（procd 本身没有工作目录参数） |
+| `ExecStart=... run` | `procd_set_param command ... run`（必须前台运行，不能用会 fork 的 `zlt start`） |
+| `Restart=always` / `RestartSec=2` | `respawn 3600 2 0` |
+| `[Install] WantedBy=` | `START=99` + `/etc/rc.d/S99zhulingtai` |
+
+注意事项：
+
+- 脚本位于 `/etc/init.d`，启用和停用都需要 root，请用 root 执行或加 `sudo`；普通用户执行会得到明确的权限错误。
+- 启用时会先 `enable`，再检查是否已有实例持有 `data/zlt.pid`；没有才 `start`，避免 procd 与手动 `zlt start` 各起一个实例。
+- 不带参数执行 `autostart enable` 保留已有脚本；显式传 `--listen` 或 `--pid-file` 会重新生成。更新脚本后需手动 `/etc/init.d/zhulingtai restart`。
+- 停止、重启交给 init 脚本，不要用 `zlt stop`：procd 的 respawn 会重新拉起进程。要取消自启并停止服务，用 `./zlt autostart disable`。
+- OpenWrt 的 `/etc/rc.d` 是启用链接所在目录，`autostart status` 据此判断是否已启用。
+- 日志用 `logread -e zlt` 查看（stdout/stderr 已交给 procd），应用自身日志仍在 `data/app.log`。
+- 重启、升级 OpenWrt 固件会覆盖 `/etc/init.d` 下的手工文件与 `/etc/rc.d` 链接（sysupgrade 默认只保留 `/etc/config`），升级后需重新执行 `autostart enable`。
+- 只有 arm64、amd64、arm(v7)、386、riscv64 的 Linux 构建可用；32 位 MIPS（`mipsel`，如 MT7621/MT7620）因 sqlite 依赖不支持，无法编译。
 
 ## 访问鉴权与远程访问
 

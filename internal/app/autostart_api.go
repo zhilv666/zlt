@@ -13,6 +13,7 @@ func (autoStartAPIAdapter) Status() (api.AutoStartStatus, error) {
 		Supported: status.Supported,
 		Enabled:   status.Enabled,
 		Status:    status.Status,
+		Manager:   status.Manager,
 		UnitPath:  status.UnitPath,
 		Message:   status.Message,
 	}, nil

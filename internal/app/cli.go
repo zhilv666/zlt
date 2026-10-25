@@ -253,7 +253,7 @@ Commands:
   stop                Stop the background service
   restart             Restart the background service
   status              Show whether the service is running
-  autostart           Manage auto-start (system-wide for root/sudo, user-level otherwise)
+  autostart           Manage auto-start (systemd, OpenWrt procd, or Windows Run key)
   auth                Manage the browser access key
   version             Print build and version details
 
@@ -269,7 +269,9 @@ Service options:
 
 Notes:
   Linux: autostart enable accepts --listen and --pid-file. Explicit options
-  regenerate the unit; enabling without options preserves an existing unit.
+  regenerate the unit or init script; enabling without options preserves an
+  existing one. systemd uses a user unit for regular users; OpenWrt procd is
+  always system-wide and requires root.
   Only one instance is allowed per working directory. A duplicate GUI launch
   opens the running instance's dashboard; a duplicate CLI launch fails.
 
